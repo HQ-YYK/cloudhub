@@ -2,25 +2,39 @@
 
 本阶段只支持预先创建的两个账号，不提供公开注册接口。密码仅以 PBKDF2-HMAC-SHA-256 哈希、独立随机盐和迭代次数保存，原始会话令牌只存在于 HttpOnly Cookie，D1 只保存其 SHA-256 哈希。
 
-## 本地生成账号凭据
+## 本地测试账号初始化
 
-在交互式终端中分别执行两次以下命令。脚本不会把密码作为命令行参数，也不会回显输入的密码：
+本地浏览器验收使用已有的 `test` 用户。使用专用脚本更新这条本地记录，
+脚本不会把密码作为命令行参数、文件内容或日志输出，也不会创建新用户：
 
 ```bash
-node scripts/generate-password-hash.mjs
+node scripts/init-local-test-user.mjs
 ```
 
-该脚本要求在交互式终端中运行；如果终端在输入用户名后没有出现密码提示，请重新运行脚本并确认使用的是可交互的 PowerShell 或命令提示符。
+脚本要求在交互式终端中运行，固定使用 `cloudhub-db --local`，执行前确认
+`username = 'test'` 恰好匹配一条记录，并在执行后验证非敏感格式字段。
+hash 和 salt 只在内存及一次性系统临时文件中短暂存在，脚本结束时会删除临时文件。
+脚本拒绝更新其他用户名，也不接受远程数据库。
 
-脚本输出的 `username`、`password_hash`、`password_salt` 和 `password_iterations` 只应写入本地未跟踪文件或人工填入 SQL，不要提交到 Git，不要放入 `VITE_*` 变量。
+## 登录返回 401
 
-将输出值替换到 [scripts/auth-seed.example.sql](./scripts/auth-seed.example.sql) 的两个占位账号中，并自行设置不含真实密码的 UUID 和 UTC 时间。建议先复制到仓库外的临时文件：
+登录接口返回 `401` 时，先确认使用的是包含 Pages Functions 和 D1 绑定的本地地址：
 
 ```text
-cloudhub-auth-seed.local.sql
+http://127.0.0.1:8788/
 ```
 
-确认该文件未被 Git 跟踪后再使用。不要把真实凭据粘贴到聊天、日志或提交信息中。
+`http://localhost:5173/` 只启动 Vite 前端，不提供认证接口，也没有 `DB` 绑定。
+如果使用 Pages 本地运行时仍然返回 `401`，安全地检查测试账号是否存在且未禁用：
+
+```bash
+pnpm exec wrangler d1 execute cloudhub-db --local --command "SELECT id, username, disabled FROM users WHERE username = 'test' LIMIT 1;"
+```
+
+不要查询或输出 `password_hash`、`password_salt`、Cookie 或 Session Token。
+如果账号存在且 `disabled = 0`，但密码仍无法验证，重新运行
+`scripts/init-local-test-user.mjs`。该脚本会重新生成符合要求的 PBKDF2-HMAC-SHA-256
+凭据（hash 长度 43、salt 长度 22），并只更新本地 `test` 用户。
 
 ## 本地 D1 流程
 
@@ -28,10 +42,12 @@ cloudhub-auth-seed.local.sql
 
 ```bash
 pnpm exec wrangler d1 migrations apply cloudhub-db --local
-pnpm exec wrangler d1 execute cloudhub-db --local --file=cloudhub-auth-seed.local.sql
 ```
 
 这只操作本地 Wrangler 数据库，不代表生产 D1 已完成迁移。不要在没有确认目标环境时省略 `--local`。
+
+不要直接执行 [scripts/auth-seed.example.sql](./scripts/auth-seed.example.sql)；
+它是占位模板，不是可用的测试账号 seed 文件。
 
 生产环境必须由你单独确认目标 Pages 项目和 D1 数据库后执行：
 
