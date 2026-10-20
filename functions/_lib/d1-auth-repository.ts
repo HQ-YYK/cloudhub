@@ -56,23 +56,27 @@ export function createD1AuthRepository(db: D1Database): AuthRepository {
         VALUES (?, ?, 1, ?, NULL)
         ON CONFLICT(username_key, ip_hash) DO UPDATE SET
           failed_count = CASE
-            WHEN (julianday(excluded.window_started_at) - julianday(login_attempts.window_started_at))
-              * 86400000 < ? THEN login_attempts.failed_count + 1
+            WHEN ROUND((julianday(excluded.window_started_at) - julianday(login_attempts.window_started_at))
+              * 86400000) < ? THEN login_attempts.failed_count + 1
             ELSE 1
           END,
           window_started_at = CASE
-            WHEN (julianday(excluded.window_started_at) - julianday(login_attempts.window_started_at))
-              * 86400000 < ? THEN login_attempts.window_started_at
+            WHEN ROUND((julianday(excluded.window_started_at) - julianday(login_attempts.window_started_at))
+              * 86400000) < ? THEN login_attempts.window_started_at
             ELSE excluded.window_started_at
           END,
           blocked_until = CASE
             WHEN (
               CASE
-                WHEN (julianday(excluded.window_started_at) - julianday(login_attempts.window_started_at))
-                  * 86400000 < ? THEN login_attempts.failed_count + 1
+                WHEN ROUND((julianday(excluded.window_started_at) - julianday(login_attempts.window_started_at))
+                  * 86400000) < ? THEN login_attempts.failed_count + 1
                 ELSE 1
               END
-            ) >= ? THEN datetime(excluded.window_started_at, '+' || (? / 1000.0) || ' seconds')
+            ) >= ? THEN strftime(
+              '%Y-%m-%dT%H:%M:%fZ',
+              excluded.window_started_at,
+              '+' || (? / 1000.0) || ' seconds'
+            )
             ELSE NULL
           END
       `).bind(

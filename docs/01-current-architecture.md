@@ -180,3 +180,8 @@ flowchart LR
 未来自建服务器不需要复制 D1 SQL。可以新增一个实现 [AuthRepository](../../functions/_lib/auth-repository.ts) 的 PostgreSQL、SQLite 或其他数据库适配器，再由 FastAPI/Node 路由把请求转换为认证核心需要的输入。
 
 登录失败计数通过 D1 适配器中的单条原子 UPSERT 更新，避免应用层读改写造成的丢失更新。该方案保证失败计数更新本身不丢失，但不提供跨请求的强一致限流闸门；迁移到 PostgreSQL 时仍需使用原子更新或事务并进行真实数据库并发测试。
+
+真实本地 D1 集成测试、运行命令和验证边界见
+[本地 D1 集成测试记录](./06-local-d1-integration-testing.md)。特别注意：
+直接调用 `recordLoginFailure()` 在已有阻断期间可能重新计算并延长
+`blocked_until`，而 login 路由对已识别的阻断请求会提前返回，不会额外记录失败。
