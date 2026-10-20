@@ -7,17 +7,22 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import type { D1Database } from '@cloudflare/workers-types'
 import { createD1FileRepository } from './d1-file-repository.ts'
+import { FileRepositoryConflictError } from './file-repository.ts'
 
 const databaseName = 'cloudhub-db'
-const ownerId = '11111111-1111-4111-8111-111111111111'
-const otherOwnerId = '22222222-2222-4222-8222-222222222222'
+const ownerId = randomUUID()
+const otherOwnerId = randomUUID()
+const sentinelId = randomUUID()
+const ownerUsername = `file-test-owner-${randomUUID()}`
+const otherOwnerUsername = `file-test-other-${randomUUID()}`
+const sentinelUsername = `file-test-sentinel-${randomUUID()}`
 const userInsert = `
   INSERT OR IGNORE INTO users (
     id, username, password_hash, password_salt, password_iterations, disabled, created_at, updated_at
   ) VALUES (
-    '${ownerId}', 'file-test-owner', 'x', 'x', 310000, 0, '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z'
+    '${ownerId}', '${ownerUsername}', 'x', 'x', 310000, 0, '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z'
   ), (
-    '${otherOwnerId}', 'file-test-other', 'x', 'x', 310000, 0, '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z'
+    '${otherOwnerId}', '${otherOwnerUsername}', 'x', 'x', 310000, 0, '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z'
   )
 `
 
@@ -34,9 +39,13 @@ function runWrangler(sql: string) {
         if (start < 0) throw new Error(`Wrangler did not return JSON: ${output}`)
         return JSON.parse(output.slice(start)) as Array<{ results?: Array<Record<string, unknown>> }>
       } catch (error) {
-        const details = `${error}\n${(error as { stderr?: string }).stderr ?? ''}`
+        const details = [
+          error,
+          (error as { stdout?: string }).stdout,
+          (error as { stderr?: string }).stderr,
+        ].filter(Boolean).join('\n')
         if ((!details.includes('SQLITE_BUSY') && !details.includes('internal error')) || attempt === 19) {
-          throw error
+          throw new Error(details, { cause: error })
         }
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100)
       }
@@ -79,15 +88,33 @@ function database() {
 function cleanup() {
   runWrangler(`
     DELETE FROM files
-    WHERE owner_id IN ('${ownerId}', '${otherOwnerId}') AND parent_id IS NOT NULL;
+    WHERE owner_id IN ('${ownerId}', '${otherOwnerId}')
+      AND parent_id IS NOT NULL;
     DELETE FROM files
-    WHERE owner_id IN ('${ownerId}', '${otherOwnerId}') AND parent_id IS NULL
+    WHERE owner_id IN ('${ownerId}', '${otherOwnerId}')
+      AND parent_id IS NULL
   `)
   runWrangler(userInsert)
 }
 
 test.before(() => {
   runWrangler(userInsert)
+  runWrangler(`
+    INSERT INTO users (
+      id, username, password_hash, password_salt, password_iterations, disabled, created_at, updated_at
+    ) VALUES (
+      '${sentinelId}', '${sentinelUsername}', 'x', 'x', 310000, 0,
+      '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z'
+    );
+    INSERT INTO files (
+      id, owner_id, parent_id, kind, name, name_key, object_key,
+      size_bytes, mime_type, created_at, updated_at, deleted_at
+    ) VALUES (
+      '${randomUUID()}', '${sentinelId}', NULL, 'directory', 'Keep me', 'keep me',
+      NULL, NULL, NULL, '2030-01-01T00:00:00.000Z',
+      '2030-01-01T00:00:00.000Z', NULL
+    )
+  `)
 })
 
 test.after(() => {
@@ -97,7 +124,14 @@ test.after(() => {
     DELETE FROM files
     WHERE owner_id IN ('${ownerId}', '${otherOwnerId}') AND parent_id IS NULL
   `)
-  runWrangler(`DELETE FROM users WHERE id IN ('${ownerId}', '${otherOwnerId}')`)
+  const sentinel = runWrangler(`
+    SELECT COUNT(*) AS count
+    FROM files
+    WHERE owner_id = '${sentinelId}' AND name_key = 'keep me' AND deleted_at IS NULL
+  `)[0]?.results?.[0] as { count: number }
+  assert.equal(sentinel.count, 1)
+  runWrangler(`DELETE FROM files WHERE owner_id = '${sentinelId}'`)
+  runWrangler(`DELETE FROM users WHERE id IN ('${ownerId}', '${otherOwnerId}', '${sentinelId}')`)
 })
 
 test('local D1 enforces ownership, direct children, soft-delete reuse, and active name uniqueness', async () => {
@@ -116,7 +150,7 @@ test('local D1 enforces ownership, direct children, soft-delete reuse, and activ
   await assert.rejects(() => repository.createDirectory({
     id: randomUUID(), ownerId, parentId: null, name: 'documents', nameKey: 'documents',
     createdAt: '2030-01-01T00:00:00.000Z', updatedAt: '2030-01-01T00:00:00.000Z',
-  }))
+  }), (error: unknown) => error instanceof FileRepositoryConflictError)
   runWrangler(`UPDATE files SET deleted_at = '2030-01-02T00:00:00.000Z' WHERE id = '${root.id}'`)
   await repository.createDirectory({
     id: randomUUID(), ownerId, parentId: null, name: 'DOCUMENTS', nameKey: 'documents',

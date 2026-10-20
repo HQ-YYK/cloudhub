@@ -6,9 +6,9 @@ import {
   type NewDirectory,
 } from './file-repository.ts'
 
-function isConstraintError(error: unknown) {
+function isActiveNameConflict(error: unknown) {
   const message = error instanceof Error ? error.message : String(error)
-  return /constraint|unique/i.test(message)
+  return /unique constraint failed: index ['"]?idx_files_active_name['"]?/iu.test(message)
 }
 
 export function createD1FileRepository(db: D1Database): FileRepository {
@@ -55,7 +55,7 @@ export function createD1FileRepository(db: D1Database): FileRepository {
           input.updatedAt,
         ).run()
       } catch (error) {
-        if (isConstraintError(error)) throw new FileRepositoryConflictError()
+        if (isActiveNameConflict(error)) throw new FileRepositoryConflictError()
         throw error
       }
 

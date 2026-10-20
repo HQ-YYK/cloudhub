@@ -63,7 +63,11 @@ for (let attempt = 0; attempt < 20; attempt += 1) {
     })
     process.exit(0)
   } catch (error) {
-    const message = `${error}\n${error?.stderr ?? ''}`
+    const message = [
+      error,
+      error?.stdout,
+      error?.stderr,
+    ].filter(Boolean).join('\n')
     if ((!message.includes('SQLITE_BUSY') && !message.includes('internal error')) || attempt === 19) {
       process.exit(1)
     }

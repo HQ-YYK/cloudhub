@@ -8,6 +8,25 @@ function context(request: Request, DB?: D1Database) {
   return { request, env: { DB } } as never
 }
 
+function trackingDatabase() {
+  let prepareCount = 0
+  const db = {
+    prepare: () => {
+      prepareCount += 1
+      return {
+        bind: () => ({
+          first: async () => null,
+          run: async () => ({ success: true }),
+        }),
+      }
+    },
+    get prepareCount() {
+      return prepareCount
+    },
+  }
+  return db as unknown as D1Database & { readonly prepareCount: number }
+}
+
 test('file list and directory creation reject unsupported methods with Allow', async () => {
   const listResponse = await listFiles(context(new Request('https://cloudhub.test/api/files', { method: 'POST' })))
   assert.equal(listResponse.status, 405)
@@ -16,6 +35,73 @@ test('file list and directory creation reject unsupported methods with Allow', a
   const createResponse = await createDirectory(context(new Request('https://cloudhub.test/api/files/directories')))
   assert.equal(createResponse.status, 405)
   assert.equal(createResponse.headers.get('Allow'), 'POST')
+})
+
+test('directory creation accepts same-origin requests and rejects missing or foreign origins before database access', async () => {
+  const sameOriginDb = trackingDatabase()
+  const sameOrigin = await createDirectory(context(
+    new Request('https://cloudhub.test/api/files/directories', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://cloudhub.test',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ parent_id: null, name: 'Documents' }),
+    }),
+    sameOriginDb,
+  ))
+  assert.equal(sameOrigin.status, 401)
+  assert.equal(sameOriginDb.prepareCount, 0)
+
+  for (const headers of [
+    {},
+    { Origin: 'https://attacker.test' },
+    { Referer: 'https://attacker.test/form' },
+    { Referer: 'not a URL' },
+  ] as Array<Record<string, string>>) {
+    const db = trackingDatabase()
+    const response = await createDirectory(context(
+      new Request('https://cloudhub.test/api/files/directories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify({ parent_id: null, name: 'Blocked' }),
+      }),
+      db,
+    ))
+    assert.equal(response.status, 403)
+    assert.equal(db.prepareCount, 0)
+  }
+})
+
+test('directory creation rejects malformed JSON and non-object JSON bodies with 400', async () => {
+  for (const body of ['not-json', 'null', '[]', '"text"', '42']) {
+    const response = await createDirectory(context(
+      new Request('https://cloudhub.test/api/files/directories', {
+        method: 'POST',
+        headers: {
+          Origin: 'https://cloudhub.test',
+          'Content-Type': 'application/json',
+        },
+        body,
+      }),
+      trackingDatabase(),
+    ))
+    assert.equal(response.status, 400)
+    assert.deepEqual(await response.json(), { error: 'invalid_request' })
+  }
+
+  const invalidParent = await createDirectory(context(
+    new Request('https://cloudhub.test/api/files/directories', {
+      method: 'POST',
+      headers: {
+        Origin: 'https://cloudhub.test',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ parent_id: 42, name: 'Documents' }),
+    }),
+    trackingDatabase(),
+  ))
+  assert.equal(invalidParent.status, 400)
 })
 
 test('private file routes return generic unavailable and unauthenticated responses', async () => {

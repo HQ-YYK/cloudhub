@@ -16,7 +16,7 @@
 | [阶段路线图与测试矩阵](./05-roadmap-and-tests.md) | 从认证加固到私密云盘上线的实施顺序和测试要求 |
 | [本地 D1 集成测试记录](./06-local-d1-integration-testing.md) | 真实本地 SQL、限流边界、并发测试和验证范围 |
 | [登录闭环与应用主框架](./07-authenticated-workspace.md) | 前端认证状态、会话恢复、工作台模块和验证边界 |
-| [私有云盘目录元数据](./08-private-drive-metadata.md) | 文件元数据、目录 API、所有权和当前未实现范围 |
+| [私有云盘目录元数据](./08-private-drive-metadata.md) | 文件元数据、目录 API、写操作安全和当前未实现范围 |
 
 ## 当前状态一览
 
