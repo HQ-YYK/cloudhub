@@ -87,6 +87,38 @@
 .empty-module > p:not(.workspace-kicker) { max-width: 440px; margin: 0 0 26px; color: var(--muted); font-size: 14px; line-height: 1.8; }
 .outline-button { padding: 0 17px; color: var(--blue); background: #fff; border: 1px solid #cad6f4; }
 .outline-button:hover { background: #edf2ff; }
+.drive-content { max-width: 980px; }
+.drive-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 28px; margin-bottom: 24px; }
+.drive-toolbar h2 { margin: 8px 0 5px; font-size: 23px; letter-spacing: -.7px; }
+.drive-breadcrumbs { display: flex; flex-wrap: wrap; align-items: center; color: #8692a7; font-size: 12px; }
+.drive-breadcrumbs button { padding: 0; color: inherit; background: transparent; border: 0; font: inherit; }
+.drive-breadcrumbs button:not(:disabled):hover { color: var(--blue); }
+.drive-breadcrumbs button:disabled { color: var(--ink); font-weight: 650; }
+.breadcrumb-separator { margin: 0 8px; color: #c4cad6; }
+.new-folder-form { min-width: 270px; }
+.new-folder-form label { display: block; margin-bottom: 8px; color: #66738a; font-size: 11px; font-weight: 650; }
+.new-folder-controls { display: flex; gap: 8px; }
+.new-folder-controls input { width: 175px; height: 40px; padding: 0 11px; color: var(--ink); background: #fff; border: 1px solid #dce3ef; border-radius: 8px; outline: none; }
+.new-folder-controls input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(53, 104, 239, .12); }
+.new-folder-controls input:disabled { opacity: .65; }
+.primary-small-button { height: 40px; padding: 0 14px; color: #fff; background: var(--blue); border: 0; border-radius: 8px; font-size: 12px; font-weight: 700; }
+.primary-small-button:hover:not(:disabled) { background: #2859dc; }
+.primary-small-button:disabled { cursor: wait; opacity: .7; }
+.drive-form-error { margin: 8px 0 0; color: #c64f5c; font-size: 11px; }
+.drive-alert { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 16px; padding: 11px 14px; color: #a24b58; background: #fff0f1; border: 1px solid #f5d5d9; border-radius: 8px; font-size: 13px; }
+.drive-alert button { padding: 0; color: #a24b58; background: transparent; border: 0; font-size: 12px; font-weight: 700; }
+.drive-alert button:hover { color: #7e303d; }
+.drive-list-panel { min-height: 260px; padding: 24px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
+.drive-state { display: grid; justify-items: center; min-height: 210px; align-content: center; margin: 0; text-align: center; }
+.drive-state-icon { display: grid; place-items: center; width: 45px; height: 45px; margin-bottom: 13px; color: var(--blue); background: #edf2ff; border-radius: 12px; font-size: 24px; }
+.drive-state h3 { margin: 0 0 7px; font-size: 15px; }
+.drive-state p { margin: 0; color: var(--muted); font-size: 12px; }
+.drive-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.drive-folder-card { display: grid; grid-template-columns: auto 1fr; gap: 3px 11px; padding: 16px; color: var(--ink); background: #fbfcff; border: 1px solid #e1e6f0; border-radius: 10px; text-align: left; transition: border .2s, box-shadow .2s, transform .2s; }
+.drive-folder-card:hover { border-color: #b8c9f5; box-shadow: 0 8px 20px rgba(44, 70, 126, .08); transform: translateY(-1px); }
+.drive-folder-icon { grid-row: span 2; color: var(--blue); font-size: 24px; line-height: 1; }
+.drive-folder-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; }
+.drive-folder-action { color: #9aa5b7; font-size: 10px; }
 
 @media (max-width: 800px) {
   .workspace-sidebar { width: 205px; }
@@ -105,6 +137,9 @@
   .workspace-main { padding: 24px 16px 40px; }
   .workspace-topbar { margin-bottom: 24px; }
   .workspace-topbar h1 { font-size: 25px; }
+  .drive-toolbar { display: grid; gap: 20px; }
+  .new-folder-form { min-width: 0; }
+  .new-folder-controls input { flex: 1; width: auto; }
   .user-chip span:last-child { display: none; }
   .welcome-panel { min-height: 255px; padding: 28px; }
   .welcome-orbit { display: none; }

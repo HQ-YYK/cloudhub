@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../auth/useAuth'
+import CloudDrive from './CloudDrive'
 
 type Module = {
   id: string
@@ -11,7 +12,7 @@ type Module = {
 
 const modules: Module[] = [
   { id: 'overview', label: '工作台概览', description: '查看 CloudHub 的当前状态和工作方向。', icon: '⌂', available: true },
-  { id: 'drive', label: '私有云盘', description: '私密文件管理、上传与共享能力。', icon: '☁', available: false },
+  { id: 'drive', label: '私有云盘', description: '浏览目录并创建文件夹。', icon: '☁', available: true },
   { id: 'gpu', label: 'GPU 训练', description: '训练任务、日志和实验结果。', icon: '▣', available: false },
   { id: 'deploy', label: '项目部署', description: '项目地址、部署状态和文档。', icon: '↗', available: false },
   { id: 'blog', label: '技术博客', description: '技术学习、开发过程和实验总结。', icon: '▤', available: false },
@@ -77,7 +78,9 @@ export default function Workspace() {
           </div>
         </header>
         {logoutError && <p className="workspace-alert" role="alert">{logoutError}</p>}
-        {!active.available ? (
+        {activeModule === 'drive' ? (
+          <CloudDrive />
+        ) : !active.available ? (
           <section className="empty-module" aria-live="polite">
             <span className="empty-module-icon">{active.icon}</span>
             <p className="workspace-kicker">COMING SOON</p>

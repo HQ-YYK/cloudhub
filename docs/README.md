@@ -17,6 +17,7 @@
 | [本地 D1 集成测试记录](./06-local-d1-integration-testing.md) | 真实本地 SQL、限流边界、并发测试和验证范围 |
 | [登录闭环与应用主框架](./07-authenticated-workspace.md) | 前端认证状态、会话恢复、工作台模块和验证边界 |
 | [私有云盘目录元数据](./08-private-drive-metadata.md) | 文件元数据、目录 API、写操作安全和当前未实现范围 |
+| [私有云盘前端第一阶段](./09-private-drive-frontend.md) | 目录浏览、新建文件夹、状态处理和前端边界 |
 
 ## 当前状态一览
 
