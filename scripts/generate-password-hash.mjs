@@ -14,6 +14,7 @@ function readHidden(question) {
 
     output.write(question)
     input.setRawMode(true)
+    input.resume()
     let value = ''
     const onData = (chunk) => {
       const character = chunk.toString()

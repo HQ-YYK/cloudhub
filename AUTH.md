@@ -10,6 +10,8 @@
 node scripts/generate-password-hash.mjs
 ```
 
+该脚本要求在交互式终端中运行；如果终端在输入用户名后没有出现密码提示，请重新运行脚本并确认使用的是可交互的 PowerShell 或命令提示符。
+
 脚本输出的 `username`、`password_hash`、`password_salt` 和 `password_iterations` 只应写入本地未跟踪文件或人工填入 SQL，不要提交到 Git，不要放入 `VITE_*` 变量。
 
 将输出值替换到 [scripts/auth-seed.example.sql](./scripts/auth-seed.example.sql) 的两个占位账号中，并自行设置不含真实密码的 UUID 和 UTC 时间。建议先复制到仓库外的临时文件：
