@@ -42,8 +42,9 @@ wrangler d1 execute cloudhub-db --remote --file=cloudhub-auth-seed.local.sql
 
 ## API
 
-- `POST /api/auth/login`：JSON body 为 `{ "username": "...", "password": "..." }`。成功返回 `{ "user": { "id", "username" } }` 并设置会话 Cookie；凭据错误返回 `401`，格式错误返回 `400`，数据库不可用返回 `503`。
+- `POST /api/auth/login`：要求同源 `Origin` 或 `Referer`，JSON body 为 `{ "username": "...", "password": "..." }`。成功返回 `{ "user": { "id", "username" } }` 并设置会话 Cookie；凭据错误返回 `401`，格式错误返回 `400`，数据库不可用返回 `503`。
 - `GET /api/auth/me`：从 Cookie 重新验证会话，成功返回公开用户信息；未登录、过期或禁用账号返回 `401`。
 - `POST /api/auth/logout`：要求同源 `Origin` 或 `Referer`，删除当前会话并清除 Cookie；跨站请求返回 `403`。其他方法返回 `405` 和 `Allow`。
+- `POST /api/auth/logout-all`：要求同源 `Origin` 或 `Referer`，撤销当前用户的全部会话并清除当前 Cookie。
 
 登录失败按用户名和客户端 IP 的 SHA-256 哈希在 D1 中限流。IP 仅作为辅助维度，不能作为身份认证依据。
