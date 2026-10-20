@@ -33,12 +33,13 @@ export interface AuthRepository {
   findSessionUser(tokenHash: string, now: string): Promise<SessionUser | null>
   touchSession(sessionId: string, lastSeenAt: string): Promise<void>
   findLoginAttempt(username: string, ipHash: string): Promise<LoginAttempt | null>
-  upsertLoginFailure(
+  recordLoginFailure(
     username: string,
     ipHash: string,
-    failedCount: number,
-    windowStartedAt: string,
-    blockedUntil: string | null,
+    now: string,
+    windowMs: number,
+    maxFailures: number,
+    blockMs: number,
   ): Promise<void>
   clearLoginFailures(username: string, ipHash: string): Promise<void>
   createSession(session: NewSession): Promise<void>

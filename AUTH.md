@@ -22,14 +22,14 @@ cloudhub-auth-seed.local.sql
 
 ## 本地 D1 流程
 
-当前仓库没有 Wrangler 配置，也没有绑定数据库 ID，因此不会自动执行迁移。安装并登录 Wrangler 后，先创建本地 D1 数据库（或使用 Cloudflare 官方文档配置本地绑定），再执行：
+仓库已包含 [wrangler.jsonc](./wrangler.jsonc)，配置了本地 D1 数据库名称 `cloudhub-db`、绑定名 `DB` 和 `migrations` 迁移目录。Wrangler 已作为项目开发依赖安装。使用项目本地版本执行迁移：
 
 ```bash
-wrangler d1 migrations apply cloudhub-db --local
-wrangler d1 execute cloudhub-db --local --file=cloudhub-auth-seed.local.sql
+pnpm exec wrangler d1 migrations apply cloudhub-db --local
+pnpm exec wrangler d1 execute cloudhub-db --local --file=cloudhub-auth-seed.local.sql
 ```
 
-具体数据库名称和绑定配置以你的 Wrangler/Pages 项目为准。不要在没有确认目标环境时省略 `--local`。
+这只操作本地 Wrangler 数据库，不代表生产 D1 已完成迁移。不要在没有确认目标环境时省略 `--local`。
 
 生产环境必须由你单独确认目标 Pages 项目和 D1 数据库后执行：
 

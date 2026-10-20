@@ -131,6 +131,8 @@ HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=604800
 - 删除当前用户的全部 `sessions`
 - 不需要数据库迁移
 
+当前语义是撤销执行删除时已经存在的当前用户会话。并发登录请求如果在删除之后创建新会话，可能不会被本次操作撤销；要提供强一致的全量撤销，需要后续引入用户级会话版本或撤销时间机制。
+
 ## 5. 当前安全边界
 
 当前认证解决的是“谁可以调用 API”，不解决“文件内容是否只有用户能解密”。
@@ -176,3 +178,5 @@ flowchart LR
 - `wrangler.jsonc`
 
 未来自建服务器不需要复制 D1 SQL。可以新增一个实现 [AuthRepository](../../functions/_lib/auth-repository.ts) 的 PostgreSQL、SQLite 或其他数据库适配器，再由 FastAPI/Node 路由把请求转换为认证核心需要的输入。
+
+登录失败计数通过 D1 适配器中的单条原子 UPSERT 更新，避免应用层读改写造成的丢失更新。该方案保证失败计数更新本身不丢失，但不提供跨请求的强一致限流闸门；迁移到 PostgreSQL 时仍需使用原子更新或事务并进行真实数据库并发测试。

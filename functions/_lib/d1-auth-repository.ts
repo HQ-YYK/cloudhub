@@ -43,26 +43,47 @@ export function createD1AuthRepository(db: D1Database): AuthRepository {
       `).bind(username.toLowerCase(), ipHash).first<LoginAttempt>()
     },
 
-    async upsertLoginFailure(
+    async recordLoginFailure(
       username: string,
       ipHash: string,
-      failedCount: number,
-      windowStartedAt: string,
-      blockedUntil: string | null,
+      now: string,
+      windowMs: number,
+      maxFailures: number,
+      blockMs: number,
     ) {
       await db.prepare(`
         INSERT INTO login_attempts (username_key, ip_hash, failed_count, window_started_at, blocked_until)
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (?, ?, 1, ?, NULL)
         ON CONFLICT(username_key, ip_hash) DO UPDATE SET
-          failed_count = excluded.failed_count,
-          window_started_at = excluded.window_started_at,
-          blocked_until = excluded.blocked_until
+          failed_count = CASE
+            WHEN (julianday(excluded.window_started_at) - julianday(login_attempts.window_started_at))
+              * 86400000 < ? THEN login_attempts.failed_count + 1
+            ELSE 1
+          END,
+          window_started_at = CASE
+            WHEN (julianday(excluded.window_started_at) - julianday(login_attempts.window_started_at))
+              * 86400000 < ? THEN login_attempts.window_started_at
+            ELSE excluded.window_started_at
+          END,
+          blocked_until = CASE
+            WHEN (
+              CASE
+                WHEN (julianday(excluded.window_started_at) - julianday(login_attempts.window_started_at))
+                  * 86400000 < ? THEN login_attempts.failed_count + 1
+                ELSE 1
+              END
+            ) >= ? THEN datetime(excluded.window_started_at, '+' || (? / 1000.0) || ' seconds')
+            ELSE NULL
+          END
       `).bind(
         username.toLowerCase(),
         ipHash,
-        failedCount,
-        windowStartedAt,
-        blockedUntil,
+        now,
+        windowMs,
+        windowMs,
+        windowMs,
+        maxFailures,
+        blockMs,
       ).run()
     },
 

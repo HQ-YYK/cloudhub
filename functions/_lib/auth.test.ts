@@ -5,11 +5,13 @@ import { onRequest as logout } from '../api/auth/logout.ts'
 import { onRequest as logoutAll } from '../api/auth/logout-all.ts'
 import { onRequest as login } from '../api/auth/login.ts'
 import { onRequest as me } from '../api/auth/me.ts'
+import { onRequest as health } from '../api/health.ts'
 import {
   getAuthenticatedUser,
   hashPassword,
   hashSessionToken,
   isLoginBlocked,
+  recordLoginFailure,
   sessionCookie,
   verifyPassword,
 } from './auth.ts'
@@ -37,21 +39,28 @@ function database(firstResult: unknown = null) {
 function databaseWithSequence(firstResults: unknown[]) {
   let firstIndex = 0
   let runCount = 0
+  let lastBind: unknown[] = []
   const db = {
     prepare: () => ({
-      bind: () => ({
+      bind: (...values: unknown[]) => {
+        lastBind = values
+        return {
         first: async () => firstResults[firstIndex++],
         run: async () => {
           runCount += 1
           return { success: true }
         },
-      }),
+        }
+      },
     }),
     get runCount() {
       return runCount
     },
+    get lastBind() {
+      return lastBind
+    },
   }
-  return db as unknown as D1Database & { readonly runCount: number }
+  return db as unknown as D1Database & { readonly runCount: number; readonly lastBind: unknown[] }
 }
 
 function repository(firstResult: unknown = null) {
@@ -63,7 +72,7 @@ function repository(firstResult: unknown = null) {
       touchCount += 1
     },
     findLoginAttempt: async () => null,
-    upsertLoginFailure: async () => undefined,
+    recordLoginFailure: async () => undefined,
     clearLoginFailures: async () => undefined,
     createSession: async () => undefined,
     deleteSessionByTokenHash: async () => undefined,
@@ -86,6 +95,23 @@ test('session token hashes are deterministic and do not equal the token', async 
   const hash = await hashSessionToken(token)
   assert.equal(hash, await hashSessionToken(token))
   assert.notEqual(hash, token)
+})
+
+test('malformed, empty, and invalid session cookies are treated as anonymous', async () => {
+  const malformed = new Request('https://cloudhub.test/api/auth/me', {
+    headers: { Cookie: 'cloudhub_session=%invalid' },
+  })
+  const empty = new Request('https://cloudhub.test/api/auth/me', {
+    headers: { Cookie: 'cloudhub_session=' },
+  })
+  const invalid = new Request('https://cloudhub.test/api/auth/me', {
+    headers: { Cookie: 'cloudhub_session=not-a-valid-session' },
+  })
+  const authRepository = repository().authRepository
+
+  assert.equal(await getAuthenticatedUser(authRepository, malformed), null)
+  assert.equal(await getAuthenticatedUser(authRepository, empty), null)
+  assert.equal(await getAuthenticatedUser(authRepository, invalid), null)
 })
 
 test('authenticated user lookup rejects an expired or disabled session', async () => {
@@ -111,6 +137,30 @@ test('rate limiting blocks an attempt during its block window', () => {
   assert.equal(isLoginBlocked(null, now), false)
 })
 
+test('recording a login failure passes the atomic rate-limit policy to the repository', async () => {
+  let call: unknown[] = []
+  const authRepository = repository().authRepository
+  authRepository.recordLoginFailure = async (...args) => {
+    call = args
+  }
+
+  await recordLoginFailure(
+    authRepository,
+    'alice',
+    'ip-hash',
+    new Date('2026-01-01T00:00:00.000Z'),
+  )
+
+  assert.deepEqual(call, [
+    'alice',
+    'ip-hash',
+    '2026-01-01T00:00:00.000Z',
+    15 * 60 * 1000,
+    5,
+    15 * 60 * 1000,
+  ])
+})
+
 test('login rejects malformed JSON without exposing internals', async () => {
   const response = await login({
     request: new Request('https://cloudhub.test/api/auth/login', {
@@ -122,6 +172,7 @@ test('login rejects malformed JSON without exposing internals', async () => {
   } as never)
   assert.equal(response.status, 400)
   assert.deepEqual(await response.json(), { error: 'invalid_request' })
+  assert.equal(response.headers.get('Cache-Control'), 'no-store')
 })
 
 test('login rejects cross-origin requests before reading credentials', async () => {
@@ -144,6 +195,34 @@ test('authentication responses disable caching', async () => {
   } as never)
   assert.equal(response.headers.get('Cache-Control'), 'no-store')
   assert.equal(response.headers.get('X-Content-Type-Options'), 'nosniff')
+})
+
+test('health responses disable caching for success, missing DB, failure, and method errors', async () => {
+  const successDb = {
+    prepare: () => ({ first: async () => ({ ok: 1 }) }),
+  }
+  const failingDb = {
+    prepare: () => ({
+      first: async () => {
+        throw new Error('database failure')
+      },
+    }),
+  }
+  const cases = [
+    await health({ request: new Request('https://cloudhub.test/api/health'), env: { DB: successDb } } as never),
+    await health({ request: new Request('https://cloudhub.test/api/health'), env: {} } as never),
+    await health({ request: new Request('https://cloudhub.test/api/health'), env: { DB: failingDb } } as never),
+    await health({
+      request: new Request('https://cloudhub.test/api/health', { method: 'POST' }),
+      env: { DB: successDb },
+    } as never),
+  ]
+
+  assert.deepEqual(cases.map((response) => response.status), [200, 503, 503, 405])
+  for (const response of cases) {
+    assert.equal(response.headers.get('Cache-Control'), 'no-store')
+  }
+  assert.equal(cases[3].headers.get('Allow'), 'GET')
 })
 
 test('me rejects a request without a session', async () => {
@@ -169,6 +248,7 @@ test('logout deletes the hashed session and clears the cookie', async () => {
   } as never)
   assert.equal(response.status, 200)
   assert.equal(db.runCount, 1)
+  assert.equal(response.headers.get('Cache-Control'), 'no-store')
   assert.match(response.headers.get('Set-Cookie') ?? '', /Max-Age=0/)
 })
 
@@ -199,5 +279,31 @@ test('logout-all revokes every session for the authenticated user', async () => 
   } as never)
   assert.equal(response.status, 200)
   assert.equal(db.runCount, 2)
+  assert.deepEqual(db.lastBind, ['user-1'])
+  assert.equal(response.headers.get('Cache-Control'), 'no-store')
   assert.match(response.headers.get('Set-Cookie') ?? '', /Max-Age=0/)
+})
+
+test('database errors return generic service-unavailable responses', async () => {
+  const failingDb = {
+    prepare: () => ({
+      bind: () => ({
+        first: async () => {
+          throw new Error('internal database detail')
+        },
+        run: async () => {
+          throw new Error('internal database detail')
+        },
+      }),
+    }),
+  }
+  const response = await me({
+    request: new Request('https://cloudhub.test/api/auth/me', {
+      headers: { Cookie: sessionCookie('test-token') },
+    }),
+    env: { DB: failingDb },
+  } as never)
+
+  assert.equal(response.status, 503)
+  assert.deepEqual(await response.json(), { error: 'service_unavailable' })
 })

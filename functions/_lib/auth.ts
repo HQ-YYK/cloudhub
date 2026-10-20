@@ -78,13 +78,18 @@ function parseCookies(cookieHeader: string | null) {
     if (separator <= 0) continue
     const name = part.slice(0, separator).trim()
     const value = part.slice(separator + 1).trim()
-    cookies.set(name, decodeURIComponent(value))
+    try {
+      cookies.set(name, decodeURIComponent(value))
+    } catch {
+      continue
+    }
   }
   return cookies
 }
 
 export function getSessionToken(request: Request) {
-  return parseCookies(request.headers.get('Cookie')).get('cloudhub_session') ?? null
+  const token = parseCookies(request.headers.get('Cookie')).get('cloudhub_session')
+  return token || null
 }
 
 export function sessionCookie(token: string, maxAge = SESSION_TTL_MS / 1000) {
@@ -118,17 +123,14 @@ export function isLoginBlocked(attempt: LoginAttempt | null, now = new Date()) {
 }
 
 export async function recordLoginFailure(repository: AuthRepository, username: string, ipHash: string, now = new Date()) {
-  const current = await getLoginAttempt(repository, username, ipHash)
-  const nowMs = now.getTime()
-  const windowStart = current && nowMs - new Date(current.window_started_at).getTime() < LOGIN_WINDOW_MS
-    ? current.window_started_at
-    : now.toISOString()
-  const failedCount = current && windowStart === current.window_started_at ? current.failed_count + 1 : 1
-  const blockedUntil = failedCount >= MAX_LOGIN_FAILURES
-    ? new Date(nowMs + LOGIN_BLOCK_MS).toISOString()
-    : null
-
-  await repository.upsertLoginFailure(username, ipHash, failedCount, windowStart, blockedUntil)
+  await repository.recordLoginFailure(
+    username,
+    ipHash,
+    now.toISOString(),
+    LOGIN_WINDOW_MS,
+    MAX_LOGIN_FAILURES,
+    LOGIN_BLOCK_MS,
+  )
 }
 
 export async function clearLoginFailures(repository: AuthRepository, username: string, ipHash: string) {

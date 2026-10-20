@@ -1,40 +1,10 @@
 import type { PagesFunction } from '@cloudflare/workers-types'
+import type { AuthEnv } from '../_lib/cloudflare-env.ts'
+import { jsonResponse, methodNotAllowed } from '../_lib/http.ts'
 
-interface Env {
-  DB?: D1Database
-}
-
-type HealthResponse = {
-  ok: boolean
-  service: 'cloudhub-api'
-  database: 'connected' | 'unavailable'
-}
-
-const jsonHeaders = {
-  'Content-Type': 'application/json; charset=utf-8',
-}
-
-function jsonResponse(body: HealthResponse, status: number, headers?: HeadersInit) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      ...jsonHeaders,
-      ...headers,
-    },
-  })
-}
-
-export const onRequest: PagesFunction<Env> = async (context) => {
+export const onRequest: PagesFunction<AuthEnv> = async (context) => {
   if (context.request.method !== 'GET') {
-    return jsonResponse(
-      {
-        ok: false,
-        service: 'cloudhub-api',
-        database: 'unavailable',
-      },
-      405,
-      { Allow: 'GET' },
-    )
+    return methodNotAllowed('GET')
   }
 
   if (!context.env.DB) {
