@@ -13,6 +13,7 @@ import {
   sessionCookie,
   verifyPassword,
 } from './auth.ts'
+import type { AuthRepository } from './auth-repository.ts'
 
 function database(firstResult: unknown = null) {
   let runCount = 0
@@ -53,6 +54,24 @@ function databaseWithSequence(firstResults: unknown[]) {
   return db as unknown as D1Database & { readonly runCount: number }
 }
 
+function repository(firstResult: unknown = null) {
+  let touchCount = 0
+  const authRepository: AuthRepository = {
+    findUser: async () => null,
+    findSessionUser: async () => firstResult as never,
+    touchSession: async () => {
+      touchCount += 1
+    },
+    findLoginAttempt: async () => null,
+    upsertLoginFailure: async () => undefined,
+    clearLoginFailures: async () => undefined,
+    createSession: async () => undefined,
+    deleteSessionByTokenHash: async () => undefined,
+    revokeAllSessions: async () => undefined,
+  }
+  return { authRepository, get touchCount() { return touchCount } }
+}
+
 test('password verification accepts the correct password and rejects a wrong one', async () => {
   const stored = await hashPassword('correct horse battery staple')
   assert.equal(
@@ -73,13 +92,13 @@ test('authenticated user lookup rejects an expired or disabled session', async (
   const request = new Request('https://cloudhub.test/api/auth/me', {
     headers: { Cookie: sessionCookie('test-token') },
   })
-  const validDb = database({ session_id: 'session-1', id: 'user-1', username: 'alice' })
-  assert.deepEqual(await getAuthenticatedUser(validDb, request), {
+  const validRepository = repository({ session_id: 'session-1', id: 'user-1', username: 'alice' })
+  assert.deepEqual(await getAuthenticatedUser(validRepository.authRepository, request), {
     id: 'user-1',
     username: 'alice',
   })
-  assert.equal(validDb.runCount, 1)
-  assert.equal(await getAuthenticatedUser(database(null), request), null)
+  assert.equal(validRepository.touchCount, 1)
+  assert.equal(await getAuthenticatedUser(repository().authRepository, request), null)
 })
 
 test('rate limiting blocks an attempt during its block window', () => {

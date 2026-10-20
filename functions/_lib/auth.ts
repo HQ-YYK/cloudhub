@@ -1,4 +1,4 @@
-import type { D1Database, PagesFunction } from '@cloudflare/workers-types'
+import type { AuthRepository, LoginAttempt, NewSession } from './auth-repository.ts'
 
 export const PASSWORD_ITERATIONS = 310000
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000
@@ -6,30 +6,9 @@ export const MAX_LOGIN_FAILURES = 5
 export const LOGIN_WINDOW_MS = 15 * 60 * 1000
 export const LOGIN_BLOCK_MS = 15 * 60 * 1000
 
-export interface AuthEnv {
-  DB?: D1Database
-}
-
 export interface PublicUser {
   id: string
   username: string
-}
-
-interface StoredUser extends PublicUser {
-  password_hash: string
-  password_salt: string
-  password_iterations: number
-  disabled: number
-}
-
-interface SessionUser extends PublicUser {
-  session_id: string
-}
-
-interface LoginAttempt {
-  failed_count: number
-  window_started_at: string
-  blocked_until: string | null
 }
 
 const encoder = new TextEncoder()
@@ -116,44 +95,30 @@ export function clearSessionCookie() {
   return sessionCookie('', 0)
 }
 
-export async function getAuthenticatedUser(db: D1Database, request: Request, now = new Date()) {
+export async function getAuthenticatedUser(repository: AuthRepository, request: Request, now = new Date()) {
   const token = getSessionToken(request)
   if (!token) return null
 
   const tokenHash = await hashSessionToken(token)
-  const row = await db.prepare(`
-    SELECT s.id AS session_id, u.id, u.username
-    FROM sessions s
-    INNER JOIN users u ON u.id = s.user_id
-    WHERE s.token_hash = ?
-      AND s.expires_at > ?
-      AND u.disabled = 0
-    LIMIT 1
-  `).bind(tokenHash, now.toISOString()).first<SessionUser>()
+  const row = await repository.findSessionUser(tokenHash, now.toISOString())
 
   if (!row) return null
 
-  await db.prepare('UPDATE sessions SET last_seen_at = ? WHERE id = ?')
-    .bind(now.toISOString(), row.session_id)
-    .run()
+  await repository.touchSession(row.session_id, now.toISOString())
 
   return { id: row.id, username: row.username } satisfies PublicUser
 }
 
-export async function getLoginAttempt(db: D1Database, username: string, ipHash: string) {
-  return db.prepare(`
-    SELECT failed_count, window_started_at, blocked_until
-    FROM login_attempts
-    WHERE username_key = ? AND ip_hash = ?
-  `).bind(username.toLowerCase(), ipHash).first<LoginAttempt>()
+export async function getLoginAttempt(repository: AuthRepository, username: string, ipHash: string) {
+  return repository.findLoginAttempt(username, ipHash)
 }
 
 export function isLoginBlocked(attempt: LoginAttempt | null, now = new Date()) {
   return Boolean(attempt?.blocked_until && new Date(attempt.blocked_until).getTime() > now.getTime())
 }
 
-export async function recordLoginFailure(db: D1Database, username: string, ipHash: string, now = new Date()) {
-  const current = await getLoginAttempt(db, username, ipHash)
+export async function recordLoginFailure(repository: AuthRepository, username: string, ipHash: string, now = new Date()) {
+  const current = await getLoginAttempt(repository, username, ipHash)
   const nowMs = now.getTime()
   const windowStart = current && nowMs - new Date(current.window_started_at).getTime() < LOGIN_WINDOW_MS
     ? current.window_started_at
@@ -163,32 +128,25 @@ export async function recordLoginFailure(db: D1Database, username: string, ipHas
     ? new Date(nowMs + LOGIN_BLOCK_MS).toISOString()
     : null
 
-  await db.prepare(`
-    INSERT INTO login_attempts (username_key, ip_hash, failed_count, window_started_at, blocked_until)
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(username_key, ip_hash) DO UPDATE SET
-      failed_count = excluded.failed_count,
-      window_started_at = excluded.window_started_at,
-      blocked_until = excluded.blocked_until
-  `).bind(username.toLowerCase(), ipHash, failedCount, windowStart, blockedUntil).run()
+  await repository.upsertLoginFailure(username, ipHash, failedCount, windowStart, blockedUntil)
 }
 
-export async function clearLoginFailures(db: D1Database, username: string, ipHash: string) {
-  await db.prepare('DELETE FROM login_attempts WHERE username_key = ? AND ip_hash = ?')
-    .bind(username.toLowerCase(), ipHash).run()
+export async function clearLoginFailures(repository: AuthRepository, username: string, ipHash: string) {
+  await repository.clearLoginFailures(username, ipHash)
 }
 
-export async function revokeAllSessions(db: D1Database, userId: string) {
-  await db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId).run()
+export async function revokeAllSessions(repository: AuthRepository, userId: string) {
+  await repository.revokeAllSessions(userId)
 }
 
-export async function findUser(db: D1Database, username: string) {
-  return db.prepare(`
-    SELECT id, username, password_hash, password_salt, password_iterations, disabled
-    FROM users
-    WHERE username = ?
-    LIMIT 1
-  `).bind(username).first<StoredUser>()
+export async function findUser(repository: AuthRepository, username: string) {
+  return repository.findUser(username)
 }
 
-export const withAuthEnv = <T extends AuthEnv>(handler: PagesFunction<T>) => handler
+export async function createSession(repository: AuthRepository, session: NewSession) {
+  await repository.createSession(session)
+}
+
+export async function deleteSessionByTokenHash(repository: AuthRepository, tokenHash: string) {
+  await repository.deleteSessionByTokenHash(tokenHash)
+}

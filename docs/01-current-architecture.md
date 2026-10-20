@@ -25,7 +25,10 @@ sequenceDiagram
 
 | 文件 | 作用 |
 | --- | --- |
-| [functions/_lib/auth.ts](../../functions/_lib/auth.ts) | 密码、会话、Cookie、限流和认证查询 |
+| [functions/_lib/auth.ts](../../functions/_lib/auth.ts) | 与运行时无关的密码、会话、Cookie、限流和认证规则 |
+| [functions/_lib/auth-repository.ts](../../functions/_lib/auth-repository.ts) | 用户、会话和限流的存储接口 |
+| [functions/_lib/d1-auth-repository.ts](../../functions/_lib/d1-auth-repository.ts) | Cloudflare D1 存储适配器 |
+| [functions/_lib/cloudflare-env.ts](../../functions/_lib/cloudflare-env.ts) | Pages/D1 环境类型边界 |
 | [functions/_lib/http.ts](../../functions/_lib/http.ts) | JSON 响应、同源校验和统一安全头 |
 | [functions/api/auth/login.ts](../../functions/api/auth/login.ts) | 登录 |
 | [functions/api/auth/me.ts](../../functions/api/auth/me.ts) | 当前用户 |
@@ -139,3 +142,37 @@ HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=604800
     ≠
 文件加密已实现
 ```
+
+## 6. 部署解耦边界
+
+认证规则和存储实现已经分开：
+
+```mermaid
+flowchart LR
+    Route[Pages API Route] --> Core[Auth Core]
+    Route --> Adapter[D1 Repository Adapter]
+    Core --> Contract[AuthRepository Contract]
+    Adapter --> Contract
+    Adapter --> D1[(Cloudflare D1)]
+    Contract -.未来替换.-> SQL[(PostgreSQL / SQLite)]
+```
+
+### 已抽离的部分
+
+- PBKDF2 密码校验
+- 会话令牌哈希
+- Cookie 解析和生成
+- 登录失败限流规则
+- 当前用户认证规则
+- 会话创建、删除和全量撤销的 repository 接口
+
+### 仍属于 Cloudflare 适配层的部分
+
+- Pages Functions 的 `onRequest`
+- `context.env.DB`
+- `D1Database`
+- D1 SQL
+- `CF-Connecting-IP`
+- `wrangler.jsonc`
+
+未来自建服务器不需要复制 D1 SQL。可以新增一个实现 [AuthRepository](../../functions/_lib/auth-repository.ts) 的 PostgreSQL、SQLite 或其他数据库适配器，再由 FastAPI/Node 路由把请求转换为认证核心需要的输入。

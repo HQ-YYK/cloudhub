@@ -1,6 +1,7 @@
 import type { PagesFunction } from '@cloudflare/workers-types'
 import {
   clearLoginFailures,
+  createSession,
   createSessionToken,
   findUser,
   getLoginAttempt,
@@ -10,8 +11,9 @@ import {
   sessionCookie,
   sha256,
   verifyPassword,
-  type AuthEnv,
 } from '../../../functions/_lib/auth.ts'
+import { createD1AuthRepository } from '../../../functions/_lib/d1-auth-repository.ts'
+import type { AuthEnv } from '../../../functions/_lib/cloudflare-env.ts'
 import { jsonResponse, methodNotAllowed, sameOriginRequest } from '../../../functions/_lib/http.ts'
 
 const INVALID_LOGIN = { error: 'invalid_credentials' }
@@ -21,6 +23,7 @@ export const onRequest: PagesFunction<AuthEnv> = async (context) => {
   if (context.request.method !== 'POST') return methodNotAllowed('POST')
   if (!sameOriginRequest(context.request)) return jsonResponse({ error: 'forbidden' }, 403)
   if (!context.env.DB) return jsonResponse({ error: 'service_unavailable' }, 503)
+  const repository = createD1AuthRepository(context.env.DB)
 
   let payload: { username?: unknown; password?: unknown }
   try {
@@ -47,10 +50,10 @@ export const onRequest: PagesFunction<AuthEnv> = async (context) => {
   const now = new Date()
 
   try {
-    const attempt = await getLoginAttempt(context.env.DB, payload.username, ipHash)
+    const attempt = await getLoginAttempt(repository, payload.username, ipHash)
     if (isLoginBlocked(attempt, now)) return jsonResponse(INVALID_LOGIN, 401)
 
-    const user = await findUser(context.env.DB, payload.username)
+    const user = await findUser(repository, payload.username)
     const passwordRecord = user ?? {
       password_hash: 'A'.repeat(43),
       password_salt: 'A'.repeat(22),
@@ -66,7 +69,7 @@ export const onRequest: PagesFunction<AuthEnv> = async (context) => {
     const valid = Boolean(user && user.disabled === 0 && passwordMatches)
 
     if (!valid || !user) {
-      await recordLoginFailure(context.env.DB, payload.username, ipHash, now)
+      await recordLoginFailure(repository, payload.username, ipHash, now)
       return jsonResponse(INVALID_LOGIN, 401)
     }
 
@@ -75,11 +78,15 @@ export const onRequest: PagesFunction<AuthEnv> = async (context) => {
     const timestamp = now.toISOString()
     const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
 
-    await context.env.DB.prepare(`
-      INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at, last_seen_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).bind(crypto.randomUUID(), user.id, tokenHash, timestamp, expiresAt, timestamp).run()
-    await clearLoginFailures(context.env.DB, payload.username, ipHash)
+    await createSession(repository, {
+      id: crypto.randomUUID(),
+      userId: user.id,
+      tokenHash,
+      createdAt: timestamp,
+      expiresAt,
+      lastSeenAt: timestamp,
+    })
+    await clearLoginFailures(repository, payload.username, ipHash)
 
     return jsonResponse({ user: { id: user.id, username: user.username } }, 200, {
       'Set-Cookie': sessionCookie(token),
