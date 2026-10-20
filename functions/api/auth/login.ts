@@ -12,13 +12,14 @@ import {
   verifyPassword,
   type AuthEnv,
 } from '../../../functions/_lib/auth.ts'
-import { jsonResponse, methodNotAllowed } from '../../../functions/_lib/http.ts'
+import { jsonResponse, methodNotAllowed, sameOriginRequest } from '../../../functions/_lib/http.ts'
 
 const INVALID_LOGIN = { error: 'invalid_credentials' }
 const MAX_BODY_LENGTH = 2048
 
 export const onRequest: PagesFunction<AuthEnv> = async (context) => {
   if (context.request.method !== 'POST') return methodNotAllowed('POST')
+  if (!sameOriginRequest(context.request)) return jsonResponse({ error: 'forbidden' }, 403)
   if (!context.env.DB) return jsonResponse({ error: 'service_unavailable' }, 503)
 
   let payload: { username?: unknown; password?: unknown }

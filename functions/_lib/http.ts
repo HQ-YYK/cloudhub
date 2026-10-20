@@ -1,5 +1,9 @@
 export const jsonHeaders = {
   'Content-Type': 'application/json; charset=utf-8',
+  'Cache-Control': 'no-store',
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'same-origin',
+  'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'",
 }
 
 export function jsonResponse(body: unknown, status = 200, headers?: HeadersInit) {

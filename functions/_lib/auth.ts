@@ -178,6 +178,10 @@ export async function clearLoginFailures(db: D1Database, username: string, ipHas
     .bind(username.toLowerCase(), ipHash).run()
 }
 
+export async function revokeAllSessions(db: D1Database, userId: string) {
+  await db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId).run()
+}
+
 export async function findUser(db: D1Database, username: string) {
   return db.prepare(`
     SELECT id, username, password_hash, password_salt, password_iterations, disabled
