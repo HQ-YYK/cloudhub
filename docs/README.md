@@ -16,6 +16,7 @@
 | [阶段路线图与测试矩阵](./05-roadmap-and-tests.md) | 从认证加固到私密云盘上线的实施顺序和测试要求 |
 | [本地 D1 集成测试记录](./06-local-d1-integration-testing.md) | 真实本地 SQL、限流边界、并发测试和验证范围 |
 | [登录闭环与应用主框架](./07-authenticated-workspace.md) | 前端认证状态、会话恢复、工作台模块和验证边界 |
+| [私有云盘目录元数据](./08-private-drive-metadata.md) | 文件元数据、目录 API、所有权和当前未实现范围 |
 
 ## 当前状态一览
 
@@ -41,6 +42,7 @@ flowchart LR
 - 认证响应 `Cache-Control: no-store`
 - 基础 Pages 安全响应头
 - 前端登录、会话恢复、退出和认证后工作台原型
+- 文件/目录元数据、目录列表和目录创建 API（本地 D1）
 
 ### 未实现
 
@@ -54,6 +56,7 @@ flowchart LR
 - 恢复密钥
 - 文件级密钥轮换
 - 浏览器端自动化认证回归测试
+- Azure Blob 存储键生成和文件内容存储
 
 ## 重要原则
 
