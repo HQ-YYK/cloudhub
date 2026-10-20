@@ -41,7 +41,8 @@ stateDiagram-v2
     loading --> anonymous: GET /api/auth/me 返回 401
     loading --> anonymous: 网络/服务错误并显示提示
     anonymous --> authenticated: POST /api/auth/login 成功
-    authenticated --> anonymous: POST /api/auth/logout 完成或失败后清理本地状态
+    authenticated --> anonymous: POST /api/auth/logout 成功
+    authenticated --> authenticated: POST /api/auth/logout 失败，保留工作台并提示状态未知
 ```
 
 ### 会话恢复
@@ -69,9 +70,15 @@ stateDiagram-v2
 
 ### 退出
 
-退出操作调用 `POST /api/auth/logout`。请求结束后前端清理认证状态并返回登录
-页；如果网络请求失败，会显示提示，避免把本地界面状态误认为服务端退出已
-成功。
+退出操作调用 `POST /api/auth/logout`。只有服务端请求成功后，前端才清理认证
+状态并返回登录页。如果网络请求失败，工作台保持显示，并提示：
+
+```text
+退出请求未完成，服务端会话状态未知。请重试退出，或关闭此页面后重新打开。
+```
+
+这样不会把服务端未知的会话状态描述为已经撤销。用户可以重试退出；在状态
+未确认前，不能把界面上的本地状态变化当作服务端注销成功。
 
 ## 4. 工作台模块
 
@@ -121,8 +128,18 @@ git diff --check
 ```
 
 现有 Functions 测试共通过 22 项，覆盖认证 API、D1 限流和错误响应。
-当前项目没有安装浏览器端测试框架，因此登录、刷新恢复会话和退出流程尚未
-通过自动化浏览器测试验证；前端构建、类型检查和代码路径已完成验证。
+浏览器验收使用本地 `wrangler pages dev dist --local` 和专用临时测试账号
+完成，测试账号、会话和 seed 文件在验收后均已清理：
+
+- 有效账号登录进入工作台；
+- 刷新页面后通过 `/api/auth/me` 恢复会话；
+- 成功退出返回登录页；
+- 退出后 `/api/auth/me` 返回 `401 {"error":"unauthorized"}`；
+- 错误密码返回 `401` 并显示通用提示；
+- 停止本地 Pages 服务后点击退出，工作台保持显示并显示“服务端会话状态未知”。
+
+当前项目没有安装浏览器端测试框架，因此上述浏览器验收是一次性手工验证，
+不是自动化回归测试。
 
 ## 7. 尚未实现
 

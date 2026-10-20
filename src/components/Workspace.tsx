@@ -34,7 +34,7 @@ export default function Workspace() {
     try {
       await logout()
     } catch {
-      setLogoutError('退出请求未完成，但本地登录状态已清理。请稍后重新登录。')
+      setLogoutError('退出请求未完成，服务端会话状态未知。请重试退出，或关闭此页面后重新打开。')
     }
   }
 

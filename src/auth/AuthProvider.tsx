@@ -44,12 +44,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     setError(null)
-    try {
-      await logoutRequest()
-    } finally {
-      setUser(null)
-      setStatus('anonymous')
-    }
+    await logoutRequest()
+    setUser(null)
+    setStatus('anonymous')
   }, [])
 
   const clearError = useCallback(() => setError(null), [])
