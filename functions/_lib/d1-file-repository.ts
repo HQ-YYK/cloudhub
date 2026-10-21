@@ -26,6 +26,19 @@ export function createD1FileRepository(db: D1Database): FileRepository {
       `).bind(ownerId, parentId).all<FileRecord>().then((result) => result.results)
     },
 
+    async listVisibleChildren(ownerId, parentId) {
+      return db.prepare(`
+        SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
+               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status
+        FROM files
+        WHERE owner_id = ?
+          AND parent_id IS ?
+          AND deleted_at IS NULL
+          AND (kind = 'directory' OR storage_status = 'ready')
+        ORDER BY kind DESC, name_key ASC, id ASC
+      `).bind(ownerId, parentId).all<FileRecord>().then((result) => result.results)
+    },
+
     async findDirectory(ownerId, id) {
       return db.prepare(`
         SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
@@ -128,7 +141,8 @@ export function createD1FileRepository(db: D1Database): FileRepository {
           AND storage_status = ?
           AND deleted_at IS NULL
       `).bind(to, updatedAt, id, ownerId, from).run()
-      if (result.meta?.changes === 0) return null
+      if (result.meta.changes === 0) return null
+      if (result.meta.changes !== 1) throw new Error('unexpected_file_storage_update_count')
 
       const updated = await db.prepare(`
         SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
@@ -137,7 +151,7 @@ export function createD1FileRepository(db: D1Database): FileRepository {
         WHERE id = ? AND owner_id = ?
         LIMIT 1
       `).bind(id, ownerId).first<FileRecord>()
-      if (!updated || updated.storage_status !== to) return null
+      if (!updated || updated.storage_status !== to) throw new Error('updated_file_not_found')
       return updated
     },
   }

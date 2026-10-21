@@ -13,10 +13,16 @@ import {
 export const FILE_NAME_MAX_LENGTH = 255
 
 export class FileServiceError extends Error {
-  readonly code: 'unauthorized' | 'invalid_name' | 'invalid_parent' | 'conflict'
+  readonly code:
+    | 'unauthorized'
+    | 'invalid_name'
+    | 'invalid_parent'
+    | 'resource_not_found'
+    | 'invalid_storage_transition'
+    | 'conflict'
 
-  constructor(code: FileServiceError['code']) {
-    super(code)
+  constructor(code: FileServiceError['code'], options?: ErrorOptions) {
+    super(code, options)
     this.name = 'FileServiceError'
     this.code = code
   }
@@ -64,7 +70,7 @@ export async function listFiles(
     const parent = await fileRepository.findDirectory(user.id, parentId)
     if (!parent) throw new FileServiceError('invalid_parent')
   }
-  return fileRepository.listChildren(user.id, parentId)
+  return fileRepository.listVisibleChildren(user.id, parentId)
 }
 
 export async function createDirectory(
@@ -111,9 +117,13 @@ export async function transitionFileStorage(
   const user = await getAuthenticatedUser(authRepository, request)
   if (!user) throw new FileServiceError('unauthorized')
   validateId(fileId)
-  assertFileStorageTransition(from, to)
+  try {
+    assertFileStorageTransition(from, to)
+  } catch (error) {
+    throw new FileServiceError('invalid_storage_transition', { cause: error })
+  }
   const updated = await fileRepository.updateFileStorageStatus(user.id, fileId, from, to, updatedAt)
-  if (!updated) throw new FileServiceError('invalid_parent')
+  if (!updated) throw new FileServiceError('resource_not_found')
   return updated
 }
 

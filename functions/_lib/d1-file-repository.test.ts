@@ -16,6 +16,52 @@ function databaseWithInsertError(message: string) {
   } as unknown as D1Database
 }
 
+function databaseWithUpdateResult(changes: number) {
+  return {
+    prepare: () => ({
+      bind: () => ({
+        run: async () => ({ success: true, meta: { changes } }),
+        first: async () => null,
+      }),
+    }),
+  } as unknown as D1Database
+}
+
+function databaseWithAtomicStorageUpdate() {
+  let status = 'pending'
+  const record = {
+    id: '33333333-3333-4333-8333-333333333333',
+    owner_id: directory.ownerId,
+    parent_id: null,
+    kind: 'file',
+    name: 'race.bin',
+    name_key: 'race.bin',
+    object_key: 'objects/race',
+    size_bytes: null,
+    mime_type: null,
+    created_at: directory.createdAt,
+    updated_at: directory.updatedAt,
+    deleted_at: null,
+    storage_status: status,
+  }
+  return {
+    prepare: (query: string) => ({
+      bind: (...parameters: unknown[]) => ({
+        run: async () => {
+          if (!query.trimStart().startsWith('UPDATE')) return { success: true, meta: { changes: 1 } }
+          const [to, , id, ownerId, from] = parameters
+          const changed = id === record.id
+            && ownerId === record.owner_id
+            && from === status
+          if (changed) status = String(to)
+          return { success: true, meta: { changes: changed ? 1 : 0 } }
+        },
+        first: async () => ({ ...record, storage_status: status }),
+      }),
+    }),
+  } as unknown as D1Database
+}
+
 const directory = {
   id: '11111111-1111-4111-8111-111111111111',
   ownerId: '22222222-2222-4222-8222-222222222222',
@@ -48,4 +94,27 @@ test('does not map foreign-key, check, or other unique errors to a name conflict
         && error.message === message,
     )
   }
+})
+
+test('returns null for an atomic storage update that changes no rows', async () => {
+  const repository = createD1FileRepository(databaseWithUpdateResult(0))
+  assert.equal(
+    await repository.updateFileStorageStatus(
+      directory.ownerId,
+      directory.id,
+      'pending',
+      'ready',
+      directory.updatedAt,
+    ),
+    null,
+  )
+})
+
+test('allows at most one concurrent transition for the same expected state', async () => {
+  const repository = createD1FileRepository(databaseWithAtomicStorageUpdate())
+  const results = await Promise.all([
+    repository.updateFileStorageStatus(directory.ownerId, '33333333-3333-4333-8333-333333333333', 'pending', 'ready', directory.updatedAt),
+    repository.updateFileStorageStatus(directory.ownerId, '33333333-3333-4333-8333-333333333333', 'pending', 'failed', directory.updatedAt),
+  ])
+  assert.equal(results.filter(Boolean).length, 1)
 })

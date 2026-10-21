@@ -8,7 +8,9 @@ import { jsonResponse, methodNotAllowed } from '../../_lib/http.ts'
 function serviceErrorResponse(error: FileServiceError) {
   if (error.code === 'unauthorized') return jsonResponse({ error: 'unauthorized' }, 401)
   if (error.code === 'invalid_name') return jsonResponse({ error: 'invalid_name' }, 400)
-  if (error.code === 'invalid_parent') return jsonResponse({ error: 'not_found' }, 404)
+  if (error.code === 'invalid_parent' || error.code === 'resource_not_found') {
+    return jsonResponse({ error: 'not_found' }, 404)
+  }
   return jsonResponse({ error: 'conflict' }, 409)
 }
 

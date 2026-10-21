@@ -13,6 +13,7 @@ import {
   normalizeFileName,
   publicFileRecord,
 } from './file-service.ts'
+import { assertFileStorageTransition, FileStorageStateError } from './file-storage-state.ts'
 
 const owner = { id: '11111111-1111-4111-8111-111111111111', username: 'alice' }
 const otherOwner = { id: '22222222-2222-4222-8222-222222222222', username: 'bob' }
@@ -39,6 +40,12 @@ function fileRepository(initial: FileRecord[] = []): FileRepository & { records:
       (record) => record.owner_id === ownerId
         && record.parent_id === parentId
         && !record.deleted_at,
+    ),
+    listVisibleChildren: async (ownerId, parentId) => records.filter(
+      (record) => record.owner_id === ownerId
+        && record.parent_id === parentId
+        && !record.deleted_at
+        && (record.kind === 'directory' || record.storage_status === 'ready'),
     ),
     findDirectory: async (ownerId, id) => records.find(
       (record) => record.owner_id === ownerId
@@ -129,6 +136,29 @@ test('lists only direct children for the authenticated owner', async () => {
   assert.ok(items.every((item) => !Object.hasOwn(publicFileRecord(item), 'object_key')))
 })
 
+test('visible lists include directories and ready files, but hide other storage states', async () => {
+  const repository = fileRepository([
+    ...(['pending', 'ready', 'failed', 'deleting'] as const).map((storage_status, index): FileRecord => ({
+      id: `33333333-3333-4333-8333-33333333333${index}`,
+      owner_id: owner.id,
+      parent_id: null,
+      kind: 'file',
+      name: `${storage_status}.bin`,
+      name_key: `${storage_status}.bin`,
+      object_key: `objects/${storage_status}`,
+      size_bytes: 1,
+      mime_type: 'application/octet-stream',
+      created_at: '2030-01-01T00:00:00.000Z',
+      updated_at: '2030-01-01T00:00:00.000Z',
+      deleted_at: null,
+      storage_status,
+    })),
+  ])
+  await createDirectory(authRepository(), repository, request, null, 'Documents')
+  const visible = await listFiles(authRepository(), repository, request, null)
+  assert.deepEqual(visible.map((item) => item.name).sort(), ['Documents', 'ready.bin'])
+})
+
 test('enforces active case-insensitive names but permits different parents and soft-deleted names', async () => {
   const repository = fileRepository()
   const root = await createDirectory(authRepository(), repository, request, null, 'Root')
@@ -179,7 +209,7 @@ test('storage transitions enforce the state machine and owner isolation', async 
       'ready',
       'pending',
     ),
-    (error: unknown) => error instanceof Error && error.message.startsWith('invalid_file_storage_transition'),
+    (error: unknown) => error instanceof FileServiceError && error.code === 'invalid_storage_transition',
   )
   await assert.rejects(
     () => transitionFileStorage(
@@ -190,6 +220,33 @@ test('storage transitions enforce the state machine and owner isolation', async 
       'ready',
       'deleting',
     ),
-    (error: unknown) => error instanceof FileServiceError && error.code === 'invalid_parent',
+    (error: unknown) => error instanceof FileServiceError && error.code === 'resource_not_found',
   )
+})
+
+test('accepts only the documented storage transition matrix', () => {
+  const allowed = new Set([
+    'pending->ready',
+    'pending->failed',
+    'pending->deleting',
+    'ready->deleting',
+    'failed->pending',
+    'failed->deleting',
+    'deleting->failed',
+  ])
+  const statuses = ['pending', 'ready', 'failed', 'deleting'] as const
+  for (const from of statuses) {
+    for (const to of statuses) {
+      if (allowed.has(`${from}->${to}`)) {
+        assert.doesNotThrow(() => assertFileStorageTransition(from, to))
+      } else {
+        assert.throws(
+          () => assertFileStorageTransition(from, to),
+          (error: unknown) => error instanceof FileStorageStateError
+            && error.from === from
+            && error.to === to,
+        )
+      }
+    }
+  }
 })

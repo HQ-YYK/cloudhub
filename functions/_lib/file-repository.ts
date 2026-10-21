@@ -49,6 +49,7 @@ export class FileRepositoryConflictError extends Error {
 
 export interface FileRepository {
   listChildren(ownerId: string, parentId: string | null): Promise<FileRecord[]>
+  listVisibleChildren(ownerId: string, parentId: string | null): Promise<FileRecord[]>
   findDirectory(ownerId: string, id: string): Promise<FileRecord | null>
   createDirectory(input: NewDirectory): Promise<FileRecord>
   findFile(ownerId: string, id: string): Promise<FileRecord | null>

@@ -13,6 +13,7 @@ const databaseName = 'cloudhub-db'
 const ownerId = randomUUID()
 const otherOwnerId = randomUUID()
 const sentinelId = randomUUID()
+const sentinelFileId = randomUUID()
 const ownerUsername = `file-test-owner-${randomUUID()}`
 const otherOwnerUsername = `file-test-other-${randomUUID()}`
 const sentinelUsername = `file-test-sentinel-${randomUUID()}`
@@ -69,8 +70,9 @@ function database() {
           })
           return {
             async run() {
-              runWrangler(expanded)
-              return { success: true }
+              const result = runWrangler(`${expanded}; SELECT changes() AS changes`)
+              const changes = Number(result.at(-1)?.results?.[0]?.changes ?? 0)
+              return { success: true, meta: { changes } }
             },
             async first<T>() {
               return (runWrangler(expanded)[0]?.results?.[0] ?? null) as T | null
@@ -110,11 +112,22 @@ test.before(() => {
       id, owner_id, parent_id, kind, name, name_key, object_key,
       size_bytes, mime_type, created_at, updated_at, deleted_at
     ) VALUES (
-      '${randomUUID()}', '${sentinelId}', NULL, 'directory', 'Keep me', 'keep me',
+      '${sentinelFileId}', '${sentinelId}', NULL, 'directory', 'Keep me', 'keep me',
       NULL, NULL, NULL, '2030-01-01T00:00:00.000Z',
       '2030-01-01T00:00:00.000Z', NULL
     )
   `)
+  const migrated = runWrangler(`
+    SELECT storage_status, object_key, size_bytes, mime_type
+    FROM files
+    WHERE id = '${sentinelFileId}'
+  `)[0]?.results?.[0]
+  assert.deepEqual(migrated, {
+    storage_status: 'ready',
+    object_key: null,
+    size_bytes: null,
+    mime_type: null,
+  })
 })
 
 test.after(() => {
@@ -225,5 +238,28 @@ test('local D1 tracks file storage states, permits failed-name retry, and isolat
       objectKey: `objects/${randomUUID()}/content`,
     }),
     (error: unknown) => error instanceof FileRepositoryConflictError,
+  )
+})
+
+test('soft-deleted files are hidden and cannot transition again', async () => {
+  cleanup()
+  const repository = createD1FileRepository(database())
+  const fileId = randomUUID()
+  await repository.createPendingFile({
+    id: fileId,
+    ownerId,
+    parentId: null,
+    name: 'deleted.bin',
+    nameKey: 'deleted.bin',
+    objectKey: `objects/${fileId}/content`,
+    mimeType: null,
+    createdAt: '2030-01-01T00:00:00.000Z',
+    updatedAt: '2030-01-01T00:00:00.000Z',
+  })
+  runWrangler(`UPDATE files SET deleted_at = '2030-01-01T00:01:00.000Z' WHERE id = '${fileId}'`)
+  assert.equal((await repository.listVisibleChildren(ownerId, null)).some((item) => item.id === fileId), false)
+  assert.equal(
+    await repository.updateFileStorageStatus(ownerId, fileId, 'pending', 'failed', '2030-01-01T00:02:00.000Z'),
+    null,
   )
 })

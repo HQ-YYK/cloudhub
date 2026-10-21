@@ -31,9 +31,10 @@ deleting -> 正在删除文件内容
 `owner_id`、`kind = 'file'` 和期望的旧状态，避免跨用户更新和并发覆盖。
 
 目录也有 `storage_status` 列以保持统一行结构，但目录创建时固定为 `ready`。
-当前 repository 的内部 `listChildren()` 会返回所有未软删除状态，供后续清理、
-恢复和诊断使用；普通用户列表在第 2C 上传链路前必须改为只返回目录和 `ready`
-文件，不能把 `pending`、`failed` 或 `deleting` 当作可下载文件。
+repository 保留内部 `listChildren()` 全状态查询，供后续清理、恢复和诊断使用；
+普通用户列表使用独立的 `listVisibleChildren()` 查询，只返回目录和 `ready` 文件，
+不会把 `pending`、`failed` 或 `deleting` 当作可下载文件。这个 SQL 过滤不依赖
+公共序列化函数。
 
 失败文件不占用同目录的活动同名约束，因此清理失败记录前也可以创建同名重试文件；
 `pending`、`ready`、`deleting` 文件以及目录仍然阻止同名活动项目。
@@ -60,5 +61,6 @@ deleting -> 正在删除文件内容
 
 `deleting` 表示删除流程已开始，不表示 Blob 已经删除。删除成功后应通过
 `deleted_at` 软删除记录；如果删除明确失败且对象仍可确认存在，后续实现应恢复
-为 `ready`，只有在对象状态未知时才使用 `failed` 等待清理或核查。当前状态机
-不表示已经执行真实 Blob 操作。
+为 `ready`，只有在对象状态未知时才使用 `failed` 等待清理或核查；`failed` 不
+证明对象一定不存在。软删除后的记录不能再次进行状态转换。当前状态机不表示
+已经执行真实 Blob 操作。
