@@ -1,6 +1,10 @@
 import { getAuthenticatedUser } from './auth.ts'
 import type { AuthRepository } from './auth-repository.ts'
 import {
+  assertFileStorageTransition,
+  type FileStorageStatus,
+} from './file-storage-state.ts'
+import {
   FileRepositoryConflictError,
   type FileRecord,
   type FileRepository,
@@ -77,6 +81,7 @@ export async function createDirectory(
     const parent = await fileRepository.findDirectory(user.id, parentId)
     if (!parent) throw new FileServiceError('invalid_parent')
   }
+
   const { name, nameKey } = normalizeFileName(rawName)
   try {
     return await fileRepository.createDirectory({
@@ -92,6 +97,24 @@ export async function createDirectory(
     if (error instanceof FileRepositoryConflictError) throw new FileServiceError('conflict')
     throw error
   }
+}
+
+export async function transitionFileStorage(
+  authRepository: AuthRepository,
+  fileRepository: FileRepository,
+  request: Request,
+  fileId: string,
+  from: FileStorageStatus,
+  to: FileStorageStatus,
+  updatedAt = new Date().toISOString(),
+) {
+  const user = await getAuthenticatedUser(authRepository, request)
+  if (!user) throw new FileServiceError('unauthorized')
+  validateId(fileId)
+  assertFileStorageTransition(from, to)
+  const updated = await fileRepository.updateFileStorageStatus(user.id, fileId, from, to, updatedAt)
+  if (!updated) throw new FileServiceError('invalid_parent')
+  return updated
 }
 
 export function publicFileRecord(record: FileRecord) {

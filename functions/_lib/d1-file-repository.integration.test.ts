@@ -175,3 +175,55 @@ test('local D1 concurrent inserts allow only one active same-name directory', as
   `)[0]?.results?.[0] as { count: number }
   assert.equal(rows.count, 1)
 })
+
+test('local D1 tracks file storage states, permits failed-name retry, and isolates owners', async () => {
+  cleanup()
+  const repository = createD1FileRepository(database())
+  const fileId = randomUUID()
+  const retryId = randomUUID()
+  const input = {
+    id: fileId,
+    ownerId,
+    parentId: null,
+    name: 'upload.bin',
+    nameKey: 'upload.bin',
+    objectKey: `objects/${fileId}/content`,
+    mimeType: 'application/octet-stream',
+    createdAt: '2030-01-01T00:00:00.000Z',
+    updatedAt: '2030-01-01T00:00:00.000Z',
+  }
+  const pending = await repository.createPendingFile(input)
+  assert.equal(pending.storage_status, 'pending')
+  assert.equal((await repository.listChildren(ownerId, null))[0]?.storage_status, 'pending')
+  assert.equal(await repository.findFile(otherOwnerId, fileId), null)
+
+  const failed = await repository.updateFileStorageStatus(
+    ownerId,
+    fileId,
+    'pending',
+    'failed',
+    '2030-01-01T00:01:00.000Z',
+  )
+  assert.equal(failed?.storage_status, 'failed')
+
+  const retry = await repository.createPendingFile({ ...input, id: retryId, objectKey: `objects/${retryId}/content` })
+  assert.equal(retry.storage_status, 'pending')
+  assert.equal(
+    await repository.updateFileStorageStatus(
+      otherOwnerId,
+      fileId,
+      'failed',
+      'pending',
+      '2030-01-01T00:02:00.000Z',
+    ),
+    null,
+  )
+  await assert.rejects(
+    () => repository.createPendingFile({
+      ...input,
+      id: randomUUID(),
+      objectKey: `objects/${randomUUID()}/content`,
+    }),
+    (error: unknown) => error instanceof FileRepositoryConflictError,
+  )
+})

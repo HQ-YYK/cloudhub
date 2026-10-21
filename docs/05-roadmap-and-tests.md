@@ -42,6 +42,21 @@ file_shares
 upload_sessions
 ```
 
+当前第 2B 阶段先落地 `files.storage_status`，不引入 `file_versions`、
+`file_shares` 或 `upload_sessions`。状态仅用于表达文件内容与 Blob 的一致性：
+
+```text
+pending -> ready | failed | deleting
+failed  -> pending | deleting
+ready   -> deleting
+deleting -> failed
+```
+
+目录固定使用 `ready`，不会因为文件状态字段从目录列表中消失。失败文件不占用
+活动同名约束，便于清理失败记录前创建同名重试文件；下载链路未来只能接受 `ready`
+文件。第 2C 开始前还必须为普通用户列表和内部状态查询分离 repository 语义，
+确保 `pending`、`failed`、`deleting` 文件不会进入可下载列表。
+
 最低权限模型：
 
 ```mermaid

@@ -66,8 +66,26 @@ function fileRepository(initial: FileRecord[] = []): FileRepository & { records:
         created_at: input.createdAt,
         updated_at: input.updatedAt,
         deleted_at: null,
-      }
+          storage_status: 'ready',
+        }
       records.push(record)
+      return record
+    },
+    findFile: async (ownerId, id) => records.find(
+      (record) => record.owner_id === ownerId && record.id === id && record.kind === 'file' && !record.deleted_at,
+    ) ?? null,
+    createPendingFile: async () => {
+      throw new Error('not_used_in_directory_tests')
+    },
+    updateFileStorageStatus: async (ownerId, id, from, to, updatedAt) => {
+      const record = records.find((candidate) => candidate.owner_id === ownerId
+        && candidate.id === id
+        && candidate.kind === 'file'
+        && candidate.storage_status === from
+        && !candidate.deleted_at)
+      if (!record) return null
+      record.storage_status = to
+      record.updated_at = updatedAt
       return record
     },
   }
@@ -123,4 +141,55 @@ test('enforces active case-insensitive names but permits different parents and s
   repository.records[0].deleted_at = '2030-01-01T00:00:00.000Z'
   const replacement = await createDirectory(authRepository(), repository, request, null, 'ROOT')
   assert.equal(replacement.parent_id, null)
+})
+
+test('storage transitions enforce the state machine and owner isolation', async () => {
+  const repository = fileRepository([{
+    id: '33333333-3333-4333-8333-333333333333',
+    owner_id: owner.id,
+    parent_id: null,
+    kind: 'file',
+    name: 'upload.bin',
+    name_key: 'upload.bin',
+    object_key: 'objects/file/content',
+    size_bytes: null,
+    mime_type: 'application/octet-stream',
+    created_at: '2030-01-01T00:00:00.000Z',
+    updated_at: '2030-01-01T00:00:00.000Z',
+    deleted_at: null,
+    storage_status: 'pending',
+  }])
+  const { transitionFileStorage } = await import('./file-service.ts')
+  const ready = await transitionFileStorage(
+    authRepository(),
+    repository,
+    request,
+    '33333333-3333-4333-8333-333333333333',
+    'pending',
+    'ready',
+    '2030-01-01T00:01:00.000Z',
+  )
+  assert.equal(ready.storage_status, 'ready')
+  await assert.rejects(
+    () => transitionFileStorage(
+      authRepository(),
+      repository,
+      request,
+      ready.id,
+      'ready',
+      'pending',
+    ),
+    (error: unknown) => error instanceof Error && error.message.startsWith('invalid_file_storage_transition'),
+  )
+  await assert.rejects(
+    () => transitionFileStorage(
+      authRepository(otherOwner),
+      repository,
+      request,
+      ready.id,
+      'ready',
+      'deleting',
+    ),
+    (error: unknown) => error instanceof FileServiceError && error.code === 'invalid_parent',
+  )
 })

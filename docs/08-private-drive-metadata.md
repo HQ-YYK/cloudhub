@@ -4,15 +4,39 @@
 
 ## 数据模型
 
-`migrations/0002_files.sql` 创建统一的 `files` 表：
+`migrations/0002_files.sql` 创建统一的 `files` 表，`migrations/0003_blob_file_state.sql`
+为文件内容增加存储状态：
 
 - `id`、`owner_id`、`parent_id`：服务端生成的资源 ID、所有者和父目录；
 - `kind`：只能是 `file` 或 `directory`；
 - `name`、`name_key`：服务端规范化后的显示名称和大小写折叠键；
 - `object_key`、`size_bytes`、`mime_type`：为后续对象存储预留，目录必须为空；
 - `created_at`、`updated_at`、`deleted_at`：生命周期时间。
+- `storage_status`：文件内容状态；目录固定为 `ready`。
 
 根目录使用 `parent_id IS NULL`，不创建虚拟根目录。活动项目由所有者、父目录和 `name_key` 的部分唯一索引防止同名；软删除后可以重新使用名称。父目录的所有者由复合外键辅助约束，业务层仍会检查它是未删除的目录。
+
+文件状态使用以下语义：
+
+```text
+pending  -> 文件元数据已创建，内容尚未确认可用
+ready    -> 文件内容已成功保存，可以授权下载
+failed   -> 保存失败，等待清理或重试
+deleting -> 正在删除文件内容
+```
+
+允许的状态转换由服务层集中校验：`pending` 可到 `ready`、`failed` 或
+`deleting`；`failed` 可重新开始 `pending` 或进入 `deleting`；`ready` 只能进入
+`deleting`；删除失败可从 `deleting` 回到 `failed`。数据库更新同时要求当前
+`owner_id`、`kind = 'file'` 和期望的旧状态，避免跨用户更新和并发覆盖。
+
+目录也有 `storage_status` 列以保持统一行结构，但目录创建时固定为 `ready`。
+当前 repository 的内部 `listChildren()` 会返回所有未软删除状态，供后续清理、
+恢复和诊断使用；普通用户列表在第 2C 上传链路前必须改为只返回目录和 `ready`
+文件，不能把 `pending`、`failed` 或 `deleting` 当作可下载文件。
+
+失败文件不占用同目录的活动同名约束，因此清理失败记录前也可以创建同名重试文件；
+`pending`、`ready`、`deleting` 文件以及目录仍然阻止同名活动项目。
 
 目录名称会先进行 NFC 规范化和前后空格去除，拒绝空名称、超过 255 个 JavaScript 字符的名称、控制字符以及路径分隔符。名称比较大小写不敏感。
 
@@ -33,3 +57,8 @@
 ### 当前未实现
 
 上传、下载、删除、重命名、移动、分享、Azure Blob、对象键生成、文件内容 MIME 检测和 E2EE 均不属于本阶段。生产 D1 迁移仍需人工确认；本阶段测试只使用本地 Wrangler D1。
+
+`deleting` 表示删除流程已开始，不表示 Blob 已经删除。删除成功后应通过
+`deleted_at` 软删除记录；如果删除明确失败且对象仍可确认存在，后续实现应恢复
+为 `ready`，只有在对象状态未知时才使用 `failed` 等待清理或核查。当前状态机
+不表示已经执行真实 Blob 操作。
