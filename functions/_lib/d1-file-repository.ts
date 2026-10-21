@@ -103,7 +103,7 @@ export function createD1FileRepository(db: D1Database): FileRepository {
           INSERT INTO files (
             id, owner_id, parent_id, kind, name, name_key, object_key,
             size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status
-          ) VALUES (?, ?, ?, 'file', ?, ?, ?, NULL, ?, ?, ?, NULL, 'pending')
+          ) VALUES (?, ?, ?, 'file', ?, ?, ?, ?, ?, ?, ?, NULL, 'pending')
         `).bind(
           input.id,
           input.ownerId,
@@ -111,6 +111,7 @@ export function createD1FileRepository(db: D1Database): FileRepository {
           input.name,
           input.nameKey,
           input.objectKey,
+          input.sizeBytes,
           input.mimeType,
           input.createdAt,
           input.updatedAt,

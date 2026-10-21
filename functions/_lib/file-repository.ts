@@ -35,6 +35,7 @@ export interface NewPendingFile {
   name: string
   nameKey: string
   objectKey: string
+  sizeBytes: number
   mimeType: string | null
   createdAt: string
   updatedAt: string

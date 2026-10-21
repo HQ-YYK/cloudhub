@@ -59,6 +59,12 @@ deleting -> failed
 状态更新使用带旧状态、owner、kind 和 `deleted_at IS NULL` 的原子条件；零行更新
 表示资源不可见或状态竞争，不通过回读推断本次更新是否成功。
 
+第 2C-1 仅实现依赖注入的上传 service，不新增公开 API 或 Azure 配置。service
+使用服务端生成的文件 ID 和对象键，限制实际请求体为 10 MiB，允许空文件，按
+`pending -> ready` 编排 Blob 写入；写入或状态确认失败时转为 `failed` 并尽可能
+清理可能已写入的对象。若请求提供 `Content-Length`，它必须与实际读取字节数一致。
+文件大小保存实际读取值，MIME 仅做基本格式校验，不进行内容魔数识别。
+
 最低权限模型：
 
 ```mermaid

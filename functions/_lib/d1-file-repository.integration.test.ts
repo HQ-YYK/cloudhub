@@ -201,12 +201,14 @@ test('local D1 tracks file storage states, permits failed-name retry, and isolat
     name: 'upload.bin',
     nameKey: 'upload.bin',
     objectKey: `objects/${fileId}/content`,
+    sizeBytes: 7,
     mimeType: 'application/octet-stream',
     createdAt: '2030-01-01T00:00:00.000Z',
     updatedAt: '2030-01-01T00:00:00.000Z',
   }
   const pending = await repository.createPendingFile(input)
   assert.equal(pending.storage_status, 'pending')
+  assert.equal(pending.size_bytes, 7)
   assert.equal((await repository.listChildren(ownerId, null))[0]?.storage_status, 'pending')
   assert.equal(await repository.findFile(otherOwnerId, fileId), null)
 
@@ -252,6 +254,7 @@ test('soft-deleted files are hidden and cannot transition again', async () => {
     name: 'deleted.bin',
     nameKey: 'deleted.bin',
     objectKey: `objects/${fileId}/content`,
+    sizeBytes: 0,
     mimeType: null,
     createdAt: '2030-01-01T00:00:00.000Z',
     updatedAt: '2030-01-01T00:00:00.000Z',

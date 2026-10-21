@@ -19,6 +19,11 @@ export class FileServiceError extends Error {
     | 'invalid_parent'
     | 'resource_not_found'
     | 'invalid_storage_transition'
+    | 'invalid_mime'
+    | 'too_large'
+    | 'invalid_body'
+    | 'upload_failed'
+    | 'cleanup_failed'
     | 'conflict'
 
   constructor(code: FileServiceError['code'], options?: ErrorOptions) {
@@ -50,7 +55,7 @@ export function normalizeFileName(value: unknown) {
   }
 }
 
-function validateId(value: unknown) {
+export function validateFileId(value: unknown) {
   if (typeof value !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value)) {
     throw new FileServiceError('invalid_parent')
   }
@@ -66,7 +71,7 @@ export async function listFiles(
   const user = await getAuthenticatedUser(authRepository, request)
   if (!user) throw new FileServiceError('unauthorized')
   if (parentId !== null) {
-    validateId(parentId)
+    validateFileId(parentId)
     const parent = await fileRepository.findDirectory(user.id, parentId)
     if (!parent) throw new FileServiceError('invalid_parent')
   }
@@ -83,7 +88,7 @@ export async function createDirectory(
   const user = await getAuthenticatedUser(authRepository, request)
   if (!user) throw new FileServiceError('unauthorized')
   if (parentId !== null) {
-    validateId(parentId)
+    validateFileId(parentId)
     const parent = await fileRepository.findDirectory(user.id, parentId)
     if (!parent) throw new FileServiceError('invalid_parent')
   }
@@ -116,7 +121,7 @@ export async function transitionFileStorage(
 ) {
   const user = await getAuthenticatedUser(authRepository, request)
   if (!user) throw new FileServiceError('unauthorized')
-  validateId(fileId)
+  validateFileId(fileId)
   try {
     assertFileStorageTransition(from, to)
   } catch (error) {
