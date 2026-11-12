@@ -135,20 +135,17 @@ class RecordingBlobStore implements BlobStore {
   private readonly putThenError: BlobStoreError | null
   private readonly deleteError: BlobStoreError | null
   private readonly sizeDelta: number
-  private readonly retainBeforePutError: boolean
 
   constructor(options: {
     putError?: BlobStoreError
     putThenError?: BlobStoreError
     deleteError?: BlobStoreError
     sizeDelta?: number
-    retainBeforePutError?: boolean
   } = {}) {
     this.putError = options.putError ?? null
     this.putThenError = options.putThenError ?? null
     this.deleteError = options.deleteError ?? null
     this.sizeDelta = options.sizeDelta ?? 0
-    this.retainBeforePutError = options.retainBeforePutError ?? false
   }
 
   async put(input: BlobPutInput): Promise<BlobHead> {
@@ -157,7 +154,7 @@ class RecordingBlobStore implements BlobStore {
     if (this.putError) throw this.putError
     const body = input.body instanceof Uint8Array ? input.body : new Uint8Array()
     if (this.putThenError) {
-      if (this.retainBeforePutError) this.objects.add(input.objectKey)
+      this.objects.add(input.objectKey)
       throw this.putThenError
     }
     this.objects.add(input.objectKey)
@@ -391,10 +388,14 @@ test('rejects actual bodies over the limit, including when Content-Length is abs
 })
 
 test('rejects Content-Length values that do not match the actual body', async () => {
-  for (const declaredSize of ['3', '6']) {
-    const { repository } = createRepository()
+  const cases = [
+    { declaredSize: '5', body: new Uint8Array(3) },
+    { declaredSize: '3', body: new Uint8Array(5) },
+  ]
+  for (const { declaredSize, body } of cases) {
+    const { repository, records } = createRepository()
     const blobStore = new RecordingBlobStore()
-    const mismatchedRequest = request('hello')
+    const mismatchedRequest = request(body)
     mismatchedRequest.headers.set('Content-Length', declaredSize)
     await assert.rejects(
       uploadFile(
@@ -408,14 +409,26 @@ test('rejects Content-Length values that do not match the actual body', async ()
       (error: unknown) => error instanceof FileUploadError && error.code === 'invalid_body',
     )
     assert.deepEqual(blobStore.calls, [])
+    assert.deepEqual(records, [])
   }
+})
+
+test('rejects a nonzero Content-Length when the request has no body', async () => {
+  const { repository } = createRepository()
+  const blobStore = new RecordingBlobStore()
+  const emptyRequest = request(null)
+  emptyRequest.headers.set('Content-Length', '1')
+  await assert.rejects(
+    uploadFile(authRepository(), repository, blobStore, emptyRequest, input, now),
+    (error: unknown) => error instanceof FileUploadError && error.code === 'invalid_body',
+  )
+  assert.deepEqual(blobStore.calls, [])
 })
 
 test('cleans an object that was stored before BlobStore reported an error', async () => {
   const { repository, calls } = createRepository()
   const blobStore = new RecordingBlobStore({
     putThenError: new BlobStoreError('unavailable'),
-    retainBeforePutError: true,
   })
   await assert.rejects(
     uploadFile(authRepository(), repository, blobStore, request('body'), input, now),

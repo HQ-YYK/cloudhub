@@ -63,7 +63,12 @@ async function readRequestBody(request: Request) {
     if (declaredSize > MAX_UPLOAD_SIZE_BYTES) throw new FileUploadError('too_large')
   }
 
-  if (!request.body) return new Uint8Array()
+  if (!request.body) {
+    if (declaredSize !== null && declaredSize !== 0) {
+      throw new FileUploadError('invalid_body')
+    }
+    return new Uint8Array()
+  }
   const reader = request.body.getReader()
   const chunks: Uint8Array[] = []
   let size = 0
