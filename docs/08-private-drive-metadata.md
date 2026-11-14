@@ -123,6 +123,22 @@ Secret，不得写入 `wrangler.jsonc`、`VITE_*` 或前端代码：
 本地 Functions 测试通过依赖注入使用 MockBlobStore 和内存 repository，不访问真实
 Azure 或远程 D1。当前测试和构建通过不代表已经完成真实 Azure 连通性验证。
 
+### 前端文件管理
+
+CloudDrive 页面复用以上后端接口提供基本文件操作：
+
+- 选择单个文件上传到当前目录；前端提示 10 MiB 限制，但实际限制仍由后端执行；
+- 文件卡片显示名称、大小、MIME 类型和更新时间；
+- 通过后端下载接口获取当前用户自己的文件，不暴露 Azure URL 或 object key；
+- 删除文件前要求确认，删除成功后刷新当前目录，目录不能删除；
+- 上传、下载和删除期间分别显示进行中状态，失败时保留列表并显示错误。
+
+前端 API 使用同源 Cookie Session。上传使用浏览器生成 boundary 的 `FormData`，不
+手动设置 multipart `Content-Type`；下载使用响应中的 `Content-Disposition` 文件名。
+本地可运行 `pnpm run test:frontend` 验证 FormData 字段、下载 URL、同源凭据和删除
+HTTP 方法；`pnpm test:functions` 验证 Pages Functions 后端。前端测试和本地构建均
+不连接真实 Azure 或远程 D1。
+
 活动同名冲突只在 D1 明确报告 `idx_files_active_name` 唯一索引错误时转换为 409。外键、CHECK、主键、其他唯一约束和未知数据库错误不会伪装成名称冲突，而由 API 返回通用服务错误。
 
 本地 D1 集成测试每次运行生成随机用户和资源 ID，只清理本次运行的数据，并使用哨兵用户验证清理不会删除既有数据。测试仍使用共享的本地 Wrangler 状态并对 SQLite 锁冲突进行有限重试；这不代表已经验证生产 D1 的错误包装或并发行为。
