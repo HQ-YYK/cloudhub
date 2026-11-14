@@ -155,5 +155,29 @@ export function createD1FileRepository(db: D1Database): FileRepository {
       if (!updated || updated.storage_status !== to) throw new Error('updated_file_not_found')
       return updated
     },
+
+    async softDeleteFile(ownerId, id, deletedAt, updatedAt) {
+      const result = await db.prepare(`
+        UPDATE files
+        SET deleted_at = ?, updated_at = ?
+        WHERE id = ?
+          AND owner_id = ?
+          AND kind = 'file'
+          AND storage_status = 'deleting'
+          AND deleted_at IS NULL
+      `).bind(deletedAt, updatedAt, id, ownerId).run()
+      if (result.meta.changes === 0) return null
+      if (result.meta.changes !== 1) throw new Error('unexpected_file_soft_delete_count')
+
+      const deleted = await db.prepare(`
+        SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
+               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status
+        FROM files
+        WHERE id = ? AND owner_id = ?
+        LIMIT 1
+      `).bind(id, ownerId).first<FileRecord>()
+      if (!deleted || deleted.deleted_at !== deletedAt) throw new Error('deleted_file_not_found')
+      return deleted
+    },
   }
 }

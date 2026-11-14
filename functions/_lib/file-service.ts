@@ -1,5 +1,6 @@
 import { getAuthenticatedUser } from './auth.ts'
 import type { AuthRepository } from './auth-repository.ts'
+import { BlobStoreError, type BlobStore } from './blob-store.ts'
 import {
   assertFileStorageTransition,
   type FileStorageStatus,
@@ -24,6 +25,7 @@ export class FileServiceError extends Error {
     | 'invalid_body'
     | 'upload_failed'
     | 'cleanup_failed'
+    | 'delete_failed'
     | 'conflict'
 
   constructor(code: FileServiceError['code'], options?: ErrorOptions) {
@@ -130,6 +132,65 @@ export async function transitionFileStorage(
   const updated = await fileRepository.updateFileStorageStatus(user.id, fileId, from, to, updatedAt)
   if (!updated) throw new FileServiceError('resource_not_found')
   return updated
+}
+
+export async function deleteFile(
+  authRepository: AuthRepository,
+  fileRepository: FileRepository,
+  createBlobStore: () => BlobStore,
+  request: Request,
+  fileId: string,
+  now = new Date().toISOString(),
+) {
+  const user = await getAuthenticatedUser(authRepository, request)
+  if (!user) throw new FileServiceError('unauthorized')
+  validateFileId(fileId)
+
+  const record = await fileRepository.findFile(user.id, fileId)
+  if (!record || record.kind !== 'file' || record.deleted_at !== null) {
+    throw new FileServiceError('resource_not_found')
+  }
+  if (record.storage_status === 'deleting') throw new FileServiceError('conflict')
+  if (record.object_key === null) throw new FileServiceError('delete_failed')
+  const blobStore = createBlobStore()
+
+  try {
+    assertFileStorageTransition(record.storage_status, 'deleting')
+  } catch (error) {
+    throw new FileServiceError('invalid_storage_transition', { cause: error })
+  }
+
+  const deleting = await fileRepository.updateFileStorageStatus(
+    user.id,
+    fileId,
+    record.storage_status,
+    'deleting',
+    now,
+  )
+  if (!deleting) throw new FileServiceError('conflict')
+  const objectKey = deleting.object_key ?? record.object_key
+
+  try {
+    await blobStore.delete(objectKey)
+  } catch (error) {
+    if (!(error instanceof BlobStoreError && error.code === 'not_found')) {
+      try {
+        await fileRepository.updateFileStorageStatus(user.id, fileId, 'deleting', 'failed', now)
+      } catch {
+        // Keep deleting when the recovery transition is uncertain.
+      }
+      throw new FileServiceError('delete_failed', { cause: error })
+    }
+  }
+
+  try {
+    const deleted = await fileRepository.softDeleteFile(user.id, fileId, now, now)
+    if (!deleted) throw new FileServiceError('delete_failed')
+    return deleted
+  } catch (error) {
+    if (error instanceof FileServiceError) throw error
+    throw new FileServiceError('delete_failed', { cause: error })
+  }
 }
 
 export function publicFileRecord(record: FileRecord) {

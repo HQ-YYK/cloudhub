@@ -62,4 +62,10 @@ export interface FileRepository {
     to: FileStorageStatus,
     updatedAt: string,
   ): Promise<FileRecord | null>
+  softDeleteFile(
+    ownerId: string,
+    id: string,
+    deletedAt: string,
+    updatedAt: string,
+  ): Promise<FileRecord | null>
 }

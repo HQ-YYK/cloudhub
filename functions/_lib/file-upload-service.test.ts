@@ -122,6 +122,7 @@ function createRepository(options: {
       pending.updated_at = updatedAt
       return options.readyResult ?? pending
     },
+    softDeleteFile: async () => null,
   }
   return { repository, calls, records }
 }

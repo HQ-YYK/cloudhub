@@ -1,8 +1,8 @@
 # 私有云盘目录元数据
 
-当前阶段只实现 D1 中的文件/目录元数据，以及使用依赖注入 BlobStore 的本地上传
-service；不接入 Azure Blob，也不公开文件上传 API，不实现下载、删除、移动、重命名
-或分享。
+当前阶段实现 D1 中的文件/目录元数据、后端文件上传和下载 API，以及使用依赖注入 BlobStore
+的文件 service。删除、移动、重命名或分享仍未实现。生产上传使用服务端
+Azure BlobStore 配置，本地测试使用 MockBlobStore。
 
 ## 数据模型
 
@@ -47,11 +47,81 @@ repository 保留内部 `listChildren()` 全状态查询，供后续清理、恢
 
 - `GET /api/files`：列出当前用户根目录的直接子项；
 - `GET /api/files?parent_id=<directory-id>`：列出指定目录的直接子项；
+- `GET /api/files/:id/download`：下载当前用户拥有的 ready 文件；
+- `DELETE /api/files/:id`：删除当前用户拥有的文件；
 - `POST /api/files/directories`：创建目录，JSON body 为 `{ "parent_id": string | null, "name": string }`。
+- `POST /api/files/upload`：上传一个文件，使用 `multipart/form-data` body。
 
 所有接口都要求现有会话认证，资源查询使用服务端认证得到的用户 ID。不存在、已删除、非目录或其他用户的父目录统一返回不可见资源错误。响应只包含必要元数据，不返回 `object_key`，并使用统一的 `Cache-Control: no-store` 和安全响应头。
 
 目录创建是使用 Cookie 会话的状态变更接口，会先复用现有 `sameOriginRequest()` 校验 `Origin` 或 `Referer`，再解析请求体或访问数据库。来源缺失、来源错误或 Referer 无法解析时返回 403。请求体必须是非数组 JSON 对象；无效 JSON、`null`、数组、字符串、数字和错误类型的 `parent_id` 返回 400。
+
+上传接口同样要求 Cookie 会话和同源请求。multipart body 只允许以下字段：
+
+- `file`：必填且只能出现一次，文件名来自 multipart 的 `filename`；
+- `parent_id`：可选且最多出现一次，缺省表示根目录。
+
+其他字段（包括 `owner_id`、`object_key`、`file_id` 和 `storage_status`）都会被拒绝。
+multipart 请求体上限为 10 MiB + 64 KiB，单个文件上限为 10 MiB，单个 part header
+上限为 8 KiB，最多允许两个 part。请求体会通过 Web Streams 逐块计数；超过上限时
+立即取消底层读取。存在 `Content-Length` 时会校验其格式、上限和实际读取长度。
+文件名、MIME 类型和父目录权限继续由上传 service 校验。
+
+成功响应为 HTTP 201：
+
+```json
+{
+  "item": {
+    "id": "file-id",
+    "parent_id": null,
+    "kind": "file",
+    "name": "example.txt",
+    "size_bytes": 7,
+    "mime_type": "text/plain",
+    "created_at": "2030-01-01T00:00:00.000Z",
+    "updated_at": "2030-01-01T00:00:00.000Z"
+  }
+}
+```
+
+响应不会包含 `owner_id`、`object_key`、`storage_status`、Azure URL 或任何凭据。常见
+错误为：401 `unauthorized`、403 `forbidden`、400 `invalid_request`/文件校验错误、
+404 `not_found`、409 `conflict`、413 `too_large` 和 503 `service_unavailable`。
+
+下载接口只接受 GET，并通过 Cookie Session 认证。文件 ID 会先验证格式，再使用已认证
+用户 ID 和文件 ID 查询；目录、其他用户文件、软删除文件以及 `pending`、`failed`、
+`deleting` 状态的文件统一返回 404。只有 `ready` 文件才会调用 BlobStore，并直接以
+流式响应返回对象内容，不把整个文件读入 API 内存。响应使用 `Content-Disposition:
+attachment`，同时提供安全 ASCII `filename` fallback 和 UTF-8 `filename*`，并设置
+可信的 `Content-Length`、文件 MIME 类型、`X-Content-Type-Options: nosniff` 及
+`Cache-Control: private, no-store`。BlobStore 缺失对象、鉴权失败或其他存储异常统一
+返回 503，不向客户端暴露 object key、Azure endpoint、响应正文或凭据。
+
+删除接口只接受 DELETE，并要求同源 Cookie Session。文件 ID 和当前用户归属在服务端
+验证；目录、其他用户文件、已软删除文件或不存在的文件统一返回 404。删除不会物理
+删除 D1 记录，也不接受客户端提供的 `owner_id` 或 `object_key`。服务端先以原子条件
+转换 `pending`、`ready` 或 `failed` 到 `deleting`，再使用记录中的 object key 删除
+Blob，最后以 `deleting` 条件执行 D1 软删除并设置 `deleted_at`。成功响应为
+`{ "deleted": true }`。
+
+Blob 不存在按既有幂等语义继续软删除；其他 Blob 删除失败会尽力将状态恢复为
+`failed`，不会软删除元数据。如果 Blob 已删除但 D1 软删除失败，记录会保留在
+`deleting`，不会错误恢复为 `ready`，并返回 503，供后续清理或核查。并发请求只有一
+个能取得有效的 `deleting` 状态转换；重复请求返回 404 或冲突响应。当前不支持目录
+删除、回收站恢复或永久删除。
+
+生产 Azure 上传需要以下服务端环境变量；`AZURE_CLIENT_SECRET` 只能配置为 Pages
+Secret，不得写入 `wrangler.jsonc`、`VITE_*` 或前端代码：
+
+- `AZURE_TENANT_ID`：Microsoft Entra tenant；
+- `AZURE_CLIENT_ID`：Entra 应用 client ID；
+- `AZURE_CLIENT_SECRET`：Entra 应用 secret；
+- `AZURE_STORAGE_ACCOUNT`：Storage Account 名称；
+- `AZURE_STORAGE_CONTAINER`：目标 Blob 容器；
+- `AZURE_STORAGE_BLOB_ENDPOINT`：可选的 HTTPS Blob endpoint，缺省使用官方 endpoint。
+
+本地 Functions 测试通过依赖注入使用 MockBlobStore 和内存 repository，不访问真实
+Azure 或远程 D1。当前测试和构建通过不代表已经完成真实 Azure 连通性验证。
 
 活动同名冲突只在 D1 明确报告 `idx_files_active_name` 唯一索引错误时转换为 409。外键、CHECK、主键、其他唯一约束和未知数据库错误不会伪装成名称冲突，而由 API 返回通用服务错误。
 
@@ -59,10 +129,11 @@ repository 保留内部 `listChildren()` 全状态查询，供后续清理、恢
 
 ### 当前未实现
 
-上传 API、下载、删除、重命名、移动、分享、Azure Blob、文件内容 MIME 魔数检测和
-E2EE 均不属于本阶段。2C-1 的上传 service 只使用注入的 BlobStore，限制请求体为
-10 MiB，先有界读取并校验 `Content-Length` 与实际大小，再创建 `pending` 元数据，
-写入对象并原子转换为 `ready`；
+HEAD、公开链接、分享、断点续传、目录删除、回收站恢复、永久删除、重命名、移动、
+文件内容 MIME 魔数检测和 E2EE 均不属于本阶段；下载仅支持已登录用户通过后端流式
+获取自己的 ready 文件。
+2C-1 的上传 service 限制文件 body 为 10 MiB，先有界读取并校验 `Content-Length`
+与实际大小，再创建 `pending` 元数据，写入对象并原子转换为 `ready`；
 失败时转换为 `failed` 并尽可能清理对象。生产 D1 迁移仍需人工确认；本阶段测试只
 使用本地 Wrangler D1 或内存测试替身。
 

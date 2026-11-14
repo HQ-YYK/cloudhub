@@ -95,6 +95,7 @@ function fileRepository(initial: FileRecord[] = []): FileRepository & { records:
       record.updated_at = updatedAt
       return record
     },
+    softDeleteFile: async () => null,
   }
 }
 
