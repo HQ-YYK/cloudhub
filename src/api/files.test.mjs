@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { deleteFile, downloadFile, uploadFile } from './files.ts'
+import { deleteFile, downloadFile } from './files.ts'
 
 function mockFetch(response, capture) {
   const original = globalThis.fetch
@@ -12,32 +12,6 @@ function mockFetch(response, capture) {
     globalThis.fetch = original
   }
 }
-
-test('upload uses FormData without overriding multipart Content-Type', async () => {
-  let request
-  const restore = mockFetch(
-    new Response(JSON.stringify({ item: { id: 'file-1' } }), {
-      status: 201,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-    (input, init) => {
-      request = { input, init }
-    },
-  )
-  try {
-    const file = new File(['hello'], 'hello.txt', { type: 'text/plain' })
-    await uploadFile(file, 'parent-1')
-    assert.equal(request.input, '/api/files/upload')
-    assert.equal(request.init.method, 'POST')
-    assert.equal(request.init.credentials, 'same-origin')
-    assert.equal(request.init.headers['Content-Type'], undefined)
-    assert.ok(request.init.body instanceof FormData)
-    assert.equal(request.init.body.get('file').name, 'hello.txt')
-    assert.equal(request.init.body.get('parent_id'), 'parent-1')
-  } finally {
-    restore()
-  }
-})
 
 test('download uses the file ID and backend filename', async () => {
   let request

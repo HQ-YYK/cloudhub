@@ -7,7 +7,7 @@ import { createD1FileRepository } from '../../_lib/d1-file-repository.ts'
 import type { FileRepository } from '../../_lib/file-repository.ts'
 import { deleteFile, FileServiceError, validateFileId } from '../../_lib/file-service.ts'
 import { jsonResponse, methodNotAllowed, sameOriginRequest } from '../../_lib/http.ts'
-import { createProductionBlobStore } from './upload.ts'
+import { createProductionBlobStore } from '../../_lib/production-blob-store.ts'
 
 interface DeleteDependencies {
   createAuthRepository: (env: AuthEnv) => AuthRepository
@@ -20,7 +20,7 @@ function serviceErrorResponse(error: FileServiceError) {
   if (error.code === 'invalid_parent') return jsonResponse({ error: 'invalid_request' }, 400)
   if (error.code === 'resource_not_found') return jsonResponse({ error: 'not_found' }, 404)
   if (error.code === 'conflict') return jsonResponse({ error: 'conflict' }, 409)
-  return jsonResponse({ error: 'service_unavailable' }, 503)
+  return jsonResponse({ error: 'storage_unavailable' }, 503)
 }
 
 export function createDeleteHandler(
@@ -53,7 +53,7 @@ export function createDeleteHandler(
       throw error
     }
 
-    if (!context.env.DB) return jsonResponse({ error: 'service_unavailable' }, 503)
+    if (!context.env.DB) return jsonResponse({ error: 'storage_unavailable' }, 503)
 
     try {
       const item = await deleteFile(
@@ -66,9 +66,9 @@ export function createDeleteHandler(
       return jsonResponse({ deleted: item.deleted_at !== null })
     } catch (error) {
       if (error instanceof FileServiceError) return serviceErrorResponse(error)
-      if (error instanceof BlobStoreError) return jsonResponse({ error: 'service_unavailable' }, 503)
+      if (error instanceof BlobStoreError) return jsonResponse({ error: 'storage_unavailable' }, 503)
       console.error('File delete request failed')
-      return jsonResponse({ error: 'service_unavailable' }, 503)
+      return jsonResponse({ error: 'storage_unavailable' }, 503)
     }
   }
 }

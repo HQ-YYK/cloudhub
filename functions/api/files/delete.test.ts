@@ -154,6 +154,7 @@ function setup(options: {
   record?: FileRecord | null
   repository?: TestRepository
   blobStore?: RecordingBlobStore
+  blobStoreFactoryError?: BlobStoreError
 } = {}) {
   const repository = options.repository ?? new TestRepository(
     options.record === undefined ? record() : options.record,
@@ -162,7 +163,10 @@ function setup(options: {
   const onRequest = createDeleteHandler({
     createAuthRepository: () => authRepository(options.authenticated ?? true, options.userId ?? ownerId),
     createFileRepository: () => repository,
-    createBlobStore: () => blobStore,
+    createBlobStore: () => {
+      if (options.blobStoreFactoryError) throw options.blobStoreFactoryError
+      return blobStore
+    },
   })
   return {
     onRequest,
@@ -244,12 +248,25 @@ test('does not delete a Blob when the deleting transition loses a race', async (
   assert.deepEqual(failedTransition.blobStore.deletedKeys, [])
 })
 
-test('restores failed after Blob deletion failure and never soft deletes metadata', async () => {
-  const current = setup()
-  current.blobStore.failure = new BlobStoreError('unavailable', 'azure_unavailable')
+test('returns storage_unavailable when the store factory throws and leaves the record ready', async () => {
+  const current = setup({
+    blobStoreFactoryError: new BlobStoreError('unavailable', 'storage_not_configured'),
+  })
   const response = await context(current.onRequest, request(), current.env)
   assert.equal(response.status, 503)
-  assert.deepEqual(await response.json(), { error: 'service_unavailable' })
+  assert.deepEqual(await response.json(), { error: 'storage_unavailable' })
+  assert.equal(current.repository.record?.storage_status, 'ready')
+  assert.equal(current.repository.record?.deleted_at, null)
+  assert.deepEqual(current.repository.updates, [])
+  assert.deepEqual(current.blobStore.deletedKeys, [])
+})
+
+test('restores failed after Blob deletion failure and never soft deletes metadata', async () => {
+  const current = setup()
+  current.blobStore.failure = new BlobStoreError('unavailable', 'storage_unavailable')
+  const response = await context(current.onRequest, request(), current.env)
+  assert.equal(response.status, 503)
+  assert.deepEqual(await response.json(), { error: 'storage_unavailable' })
   assert.equal(current.repository.record?.storage_status, 'failed')
   assert.equal(current.repository.record?.deleted_at, null)
   assert.deepEqual(current.blobStore.deletedKeys, [objectKey])

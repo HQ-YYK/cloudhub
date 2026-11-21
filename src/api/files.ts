@@ -72,18 +72,6 @@ export async function createDirectory(name: string, parentId: string | null): Pr
   return payload.item
 }
 
-export async function uploadFile(file: File, parentId: string | null): Promise<DriveItem> {
-  const formData = new FormData()
-  formData.append('file', file)
-  if (parentId !== null) formData.append('parent_id', parentId)
-  const payload = await requestFiles('/api/files/upload', {
-    method: 'POST',
-    body: formData,
-  })
-  if (!payload.item) throw new FilesRequestError(500, 'invalid_response')
-  return payload.item
-}
-
 function responseFileName(response: Response) {
   const disposition = response.headers.get('Content-Disposition') ?? ''
   const encoded = /filename\*=UTF-8''([^;]+)/iu.exec(disposition)?.[1]

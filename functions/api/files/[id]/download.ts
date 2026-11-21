@@ -8,7 +8,7 @@ import { createD1FileRepository } from '../../../_lib/d1-file-repository.ts'
 import type { FileRepository } from '../../../_lib/file-repository.ts'
 import { FileServiceError, validateFileId } from '../../../_lib/file-service.ts'
 import { jsonResponse, methodNotAllowed } from '../../../_lib/http.ts'
-import { createProductionBlobStore } from '../upload.ts'
+import { createProductionBlobStore } from '../../../_lib/production-blob-store.ts'
 
 interface DownloadDependencies {
   createAuthRepository: (env: AuthEnv) => AuthRepository
@@ -32,7 +32,7 @@ function invalidFileIdResponse() {
 }
 
 function unavailableResponse() {
-  return jsonResponse({ error: 'service_unavailable' }, 503)
+  return jsonResponse({ error: 'storage_unavailable' }, 503)
 }
 
 export function createDownloadHandler(
