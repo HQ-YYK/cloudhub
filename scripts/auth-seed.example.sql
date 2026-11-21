@@ -16,7 +16,7 @@ INSERT INTO users (
     'replace-with-user-1-name',
     'replace-with-user-1-password-hash',
     'replace-with-user-1-password-salt',
-    310000,
+    100000,
     'replace-with-utc-timestamp',
     'replace-with-utc-timestamp',
     0
@@ -26,7 +26,7 @@ INSERT INTO users (
     'replace-with-user-2-name',
     'replace-with-user-2-password-hash',
     'replace-with-user-2-password-salt',
-    310000,
+    100000,
     'replace-with-utc-timestamp',
     'replace-with-utc-timestamp',
     0

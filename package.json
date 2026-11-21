@@ -12,7 +12,6 @@
     "test:functions": "node --experimental-strip-types --test --test-concurrency=1 functions/**/*.test.ts"
   },
   "dependencies": {
-    "@mjackson/multipart-parser": "0.10.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

@@ -8,7 +8,7 @@ import { stdin as input, stdout as output } from 'node:process'
 
 const DATABASE_NAME = 'cloudhub-db'
 const USERNAME = 'test'
-const ITERATIONS = 310000
+const ITERATIONS = 100000
 const encoder = new TextEncoder()
 
 function sqlString(value) {

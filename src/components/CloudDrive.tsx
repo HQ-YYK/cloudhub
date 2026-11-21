@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import {
   createDirectory,
   deleteFile,
@@ -6,17 +6,14 @@ import {
   listFiles,
   type DriveItem,
   FilesRequestError,
-  uploadFile,
 } from '../api/files'
-
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
 type DirectoryLevel = {
   id: string | null
   name: string
 }
 
-function requestErrorMessage(error: unknown, action: 'list' | 'create' | 'upload' | 'download' | 'delete') {
+function requestErrorMessage(error: unknown, action: 'list' | 'create' | 'download' | 'delete') {
   if (error instanceof FilesRequestError) {
     if (error.status === 401) return '登录状态已失效，请重新登录后继续。'
     if (error.status === 403) return '请求来源未通过安全校验，请刷新页面后重试。'
@@ -24,7 +21,6 @@ function requestErrorMessage(error: unknown, action: 'list' | 'create' | 'upload
     if (error.status === 404) {
       return action === 'delete' ? '文件不存在或已被删除。' : '目录或文件不存在或已不可访问。'
     }
-    if (error.status === 413) return '文件超过 10 MiB 大小限制。'
     if (error.status === 400) {
       return action === 'create' ? '文件夹名称无效，请检查后重试。' : '请求无效，请检查后重试。'
     }
@@ -33,7 +29,6 @@ function requestErrorMessage(error: unknown, action: 'list' | 'create' | 'upload
   const messages = {
     list: '目录加载失败，请稍后重试。',
     create: '文件夹创建失败，请稍后重试。',
-    upload: '文件上传失败，请稍后重试。',
     download: '文件下载失败，请稍后重试。',
     delete: '文件删除失败，请稍后重试。',
   } satisfies Record<typeof action, string>
@@ -67,12 +62,9 @@ export default function CloudDrive() {
   const [folderName, setFolderName] = useState('')
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
-  const [uploading, setUploading] = useState(false)
-  const [uploadError, setUploadError] = useState('')
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [actionError, setActionError] = useState('')
-  const fileInputRef = useRef<HTMLInputElement>(null)
   const current = levels[levels.length - 1]
 
   const loadDirectory = useCallback(async (parentId: string | null) => {
@@ -129,27 +121,6 @@ export default function CloudDrive() {
     }
   }
 
-  async function handleFileSelected(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (!file) return
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-      setUploadError('文件超过 10 MiB 大小限制。')
-      return
-    }
-    setUploading(true)
-    setUploadError('')
-    setActionError('')
-    try {
-      await uploadFile(file, current.id)
-      await loadDirectory(current.id)
-    } catch (error) {
-      setUploadError(requestErrorMessage(error, 'upload'))
-    } finally {
-      setUploading(false)
-    }
-  }
-
   async function handleDownload(item: DriveItem) {
     setDownloadingId(item.id)
     setActionError('')
@@ -194,22 +165,7 @@ export default function CloudDrive() {
           </nav>
         </div>
         <div className="drive-actions">
-          <input
-            ref={fileInputRef}
-            className="visually-hidden"
-            type="file"
-            onChange={(event) => void handleFileSelected(event)}
-            disabled={uploading}
-          />
-          <button
-            className="primary-small-button"
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-          >
-            {uploading ? '上传中…' : '上传文件'}
-          </button>
-          <button className="secondary-small-button" type="button" onClick={() => void loadDirectory(current.id)} disabled={loading || uploading}>
+          <button className="secondary-small-button" type="button" onClick={() => void loadDirectory(current.id)} disabled={loading}>
             刷新
           </button>
           <form className="new-folder-form" onSubmit={handleCreateDirectory}>
@@ -223,10 +179,10 @@ export default function CloudDrive() {
                   if (createError) setCreateError('')
                 }}
                 placeholder="文件夹名称"
-                disabled={creating || uploading}
+                disabled={creating}
                 maxLength={255}
               />
-              <button className="primary-small-button" type="submit" disabled={creating || uploading}>
+              <button className="primary-small-button" type="submit" disabled={creating}>
                 {creating ? '创建中…' : '创建'}
               </button>
             </div>
@@ -234,7 +190,6 @@ export default function CloudDrive() {
           </form>
         </div>
       </div>
-      {uploadError && <div className="drive-alert" role="alert"><span>{uploadError}</span><button type="button" onClick={() => setUploadError('')}>关闭</button></div>}
       {actionError && <div className="drive-alert" role="alert"><span>{actionError}</span><button type="button" onClick={() => setActionError('')}>关闭</button></div>}
       {loadError && (
         <div className="drive-alert" role="alert">
@@ -249,7 +204,7 @@ export default function CloudDrive() {
           <div className="drive-state">
             <span className="drive-state-icon" aria-hidden="true">□</span>
             <h3>这里还没有文件</h3>
-            <p>上传文件或创建文件夹，开始整理你的云端工作资料。</p>
+            <p>创建文件夹，开始整理你的云端工作资料。</p>
           </div>
         ) : (
           <div className="drive-grid">

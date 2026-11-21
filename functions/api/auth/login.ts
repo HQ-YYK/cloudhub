@@ -7,6 +7,7 @@ import {
   getLoginAttempt,
   hashSessionToken,
   isLoginBlocked,
+  PASSWORD_ITERATIONS,
   recordLoginFailure,
   sessionCookie,
   sha256,
@@ -57,7 +58,7 @@ export const onRequest: PagesFunction<AuthEnv> = async (context) => {
     const passwordRecord = user ?? {
       password_hash: 'A'.repeat(43),
       password_salt: 'A'.repeat(22),
-      password_iterations: 310000,
+      password_iterations: PASSWORD_ITERATIONS,
       disabled: 1,
     }
     const passwordMatches = await verifyPassword(

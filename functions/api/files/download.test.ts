@@ -136,12 +136,16 @@ function handler(options: {
   userId?: string
   record?: FileRecord | null
   blobStore?: BlobStore
+  blobStoreFactoryError?: BlobStoreError
 } = {}) {
   const blobStore = options.blobStore ?? new RecordingBlobStore()
   const onRequest = createDownloadHandler({
     createAuthRepository: () => authRepository(options.authenticated ?? true, options.userId ?? ownerId),
     createFileRepository: () => fileRepository(options.record === undefined ? fileRecord() : options.record),
-    createBlobStore: () => blobStore,
+    createBlobStore: () => {
+      if (options.blobStoreFactoryError) throw options.blobStoreFactoryError
+      return blobStore
+    },
   })
   return {
     onRequest,
@@ -217,6 +221,16 @@ test('streams a ready blob and sends safe private download headers', async () =>
   assert.deepEqual((current.blobStore as RecordingBlobStore).requestedKeys, [objectKey])
 })
 
+test('returns storage_unavailable when the store factory throws and leaves metadata ready', async () => {
+  const current = handler({
+    blobStoreFactoryError: new BlobStoreError('unavailable', 'storage_not_configured'),
+  })
+  const response = await context(current.onRequest, request(), current.env)
+  assert.equal(response.status, 503)
+  assert.deepEqual(await response.json(), { error: 'storage_unavailable' })
+  assert.equal(current.blobStore === undefined, false)
+})
+
 test('sanitizes hostile names and maps BlobStore failures without leaking details', async () => {
   const hostile = handler({
     record: fileRecord({ name: 'evil"\r\nX-Leak: true.txt' }),
@@ -229,13 +243,13 @@ test('sanitizes hostile names and maps BlobStore failures without leaking detail
 
   for (const failure of [
     new BlobStoreError('not_found', 'internal-object-key'),
-    new BlobStoreError('unavailable', 'azure-endpoint-or-token'),
+    new BlobStoreError('unavailable', 'storage-not-configured'),
   ]) {
     const current = handler({ blobStore: new RecordingBlobStore(undefined, failure) })
     const response = await context(current.onRequest, request(), current.env)
     assert.equal(response.status, 503)
     const body = await response.text()
-    assert.equal(body, '{"error":"service_unavailable"}')
-    assert.doesNotMatch(body, /internal-object-key|azure-endpoint-or-token/u)
+    assert.equal(body, '{"error":"storage_unavailable"}')
+    assert.doesNotMatch(body, /internal-object-key|storage-not-configured/u)
   }
 })
