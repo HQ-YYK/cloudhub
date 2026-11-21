@@ -21,9 +21,9 @@ const userInsert = `
   INSERT OR IGNORE INTO users (
     id, username, password_hash, password_salt, password_iterations, disabled, created_at, updated_at
   ) VALUES (
-    '${ownerId}', '${ownerUsername}', 'x', 'x', 310000, 0, '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z'
+    '${ownerId}', '${ownerUsername}', 'x', 'x', 100000, 0, '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z'
   ), (
-    '${otherOwnerId}', '${otherOwnerUsername}', 'x', 'x', 310000, 0, '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z'
+    '${otherOwnerId}', '${otherOwnerUsername}', 'x', 'x', 100000, 0, '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z'
   )
 `
 
@@ -105,7 +105,7 @@ test.before(() => {
     INSERT INTO users (
       id, username, password_hash, password_salt, password_iterations, disabled, created_at, updated_at
     ) VALUES (
-      '${sentinelId}', '${sentinelUsername}', 'x', 'x', 310000, 0,
+      '${sentinelId}', '${sentinelUsername}', 'x', 'x', 100000, 0,
       '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z'
     );
     INSERT INTO files (

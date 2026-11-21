@@ -90,6 +90,18 @@ test('password verification accepts the correct password and rejects a wrong one
   assert.equal(await verifyPassword('wrong password', stored.hash, stored.salt, stored.iterations), false)
 })
 
+test('hashPassword rejects iterations above the PBKDF2 limit', async () => {
+  await assert.rejects(
+    hashPassword('password', crypto.getRandomValues(new Uint8Array(16)), 100001),
+    /pbkdf2_iteration_limit_exceeded/u,
+  )
+})
+
+test('verifyPassword rejects legacy high-iteration records without throwing', async () => {
+  const stored = await hashPassword('password')
+  assert.equal(await verifyPassword('password', stored.hash, stored.salt, 100000 * 3 + 10000), false)
+})
+
 test('session token hashes are deterministic and do not equal the token', async () => {
   const token = 'local-test-session-token'
   const hash = await hashSessionToken(token)

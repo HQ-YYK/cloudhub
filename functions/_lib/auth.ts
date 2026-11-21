@@ -1,6 +1,7 @@
 import type { AuthRepository, LoginAttempt, NewSession } from './auth-repository.ts'
 
-export const PASSWORD_ITERATIONS = 310000
+export const PASSWORD_ITERATIONS = 100000
+export const MAX_PBKDF2_ITERATIONS = 100000
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000
 export const MAX_LOGIN_FAILURES = 5
 export const LOGIN_WINDOW_MS = 15 * 60 * 1000
@@ -41,6 +42,9 @@ export async function sha256(value: string) {
 }
 
 export async function hashPassword(password: string, salt = crypto.getRandomValues(new Uint8Array(16)), iterations = PASSWORD_ITERATIONS) {
+  if (iterations > MAX_PBKDF2_ITERATIONS) {
+    throw new Error('pbkdf2_iteration_limit_exceeded')
+  }
   const key = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits'])
   const bits = await crypto.subtle.deriveBits(
     { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
