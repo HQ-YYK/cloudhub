@@ -15,8 +15,8 @@ import {
 } from './file-service.ts'
 import { assertFileStorageTransition, FileStorageStateError } from './file-storage-state.ts'
 
-const owner = { id: '11111111-1111-4111-8111-111111111111', username: 'alice' }
-const otherOwner = { id: '22222222-2222-4222-8222-222222222222', username: 'bob' }
+const owner = { id: '11111111-1111-4111-8111-111111111111', username: 'alice', role: 'user' as const, must_change_password: 0 }
+const otherOwner = { id: '22222222-2222-4222-8222-222222222222', username: 'bob', role: 'user' as const, must_change_password: 0 }
 
 function authRepository(user = owner): AuthRepository {
   return {
@@ -29,6 +29,12 @@ function authRepository(user = owner): AuthRepository {
     createSession: async () => undefined,
     deleteSessionByTokenHash: async () => undefined,
     revokeAllSessions: async () => undefined,
+    listUsers: async () => [],
+    findUserById: async () => null,
+    createUser: async () => { throw new Error('not_used') },
+    updatePassword: async () => undefined,
+    setDisabled: async () => undefined,
+    revokeOtherSessions: async () => undefined,
   }
 }
 
@@ -113,6 +119,16 @@ test('normalizes names and rejects unsafe names', () => {
       error instanceof FileServiceError && error.code === 'invalid_name'
     ))
   }
+})
+
+test('users who must change password cannot list files', async () => {
+  const pending = { ...owner, must_change_password: 1 }
+  await assert.rejects(
+    listFiles(authRepository(pending), fileRepository(), request, null),
+    (error: unknown) => (
+      error instanceof FileServiceError && error.code === 'password_change_required'
+    ),
+  )
 })
 
 test('creates root and child directories, while enforcing ownership', async () => {

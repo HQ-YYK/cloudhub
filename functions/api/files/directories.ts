@@ -7,6 +7,7 @@ import { jsonResponse, methodNotAllowed, sameOriginRequest } from '../../_lib/ht
 
 function serviceErrorResponse(error: FileServiceError) {
   if (error.code === 'unauthorized') return jsonResponse({ error: 'unauthorized' }, 401)
+  if (error.code === 'password_change_required') return jsonResponse({ error: 'password_change_required' }, 403)
   if (error.code === 'invalid_name') return jsonResponse({ error: 'invalid_name' }, 400)
   if (error.code === 'invalid_parent') return jsonResponse({ error: 'not_found' }, 404)
   return jsonResponse({ error: 'conflict' }, 409)

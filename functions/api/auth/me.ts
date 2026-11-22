@@ -12,7 +12,12 @@ export const onRequest: PagesFunction<AuthEnv> = async (context) => {
   try {
     const user = await getAuthenticatedUser(repository, context.request)
     return user
-      ? jsonResponse({ user })
+      ? jsonResponse({ user: {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        mustChangePassword: user.mustChangePassword,
+      } })
       : jsonResponse({ error: 'unauthorized' }, 401)
   } catch (error) {
     console.error('Session lookup failed', error)

@@ -5,12 +5,44 @@ export interface StoredUser {
   password_salt: string
   password_iterations: number
   disabled: number
+  role: 'admin' | 'user'
+  must_change_password: number
 }
 
 export interface SessionUser {
   session_id: string
   id: string
   username: string
+  role: 'admin' | 'user'
+  must_change_password: number
+}
+
+export interface UserSummary {
+  id: string
+  username: string
+  role: 'admin' | 'user'
+  disabled: number
+  must_change_password: number
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateUserInput {
+  id: string
+  username: string
+  passwordHash: string
+  passwordSalt: string
+  passwordIterations: number
+  role: 'admin' | 'user'
+  mustChangePassword: number
+  createdAt: string
+}
+
+export class AuthRepositoryConflictError extends Error {
+  constructor(message = 'auth_repository_conflict') {
+    super(message)
+    this.name = 'AuthRepositoryConflictError'
+  }
 }
 
 export interface LoginAttempt {
@@ -45,4 +77,10 @@ export interface AuthRepository {
   createSession(session: NewSession): Promise<void>
   deleteSessionByTokenHash(tokenHash: string): Promise<void>
   revokeAllSessions(userId: string): Promise<void>
+  listUsers(): Promise<UserSummary[]>
+  findUserById(id: string): Promise<UserSummary | null>
+  createUser(input: CreateUserInput): Promise<UserSummary>
+  updatePassword(userId: string, hash: string, salt: string, iterations: number, mustChangePassword: number, updatedAt: string): Promise<void>
+  setDisabled(userId: string, disabled: number, updatedAt: string): Promise<void>
+  revokeOtherSessions(userId: string, keepSessionId: string): Promise<void>
 }

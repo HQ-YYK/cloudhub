@@ -70,6 +70,7 @@ export function createDownloadHandler(
       const authRepository = dependencies.createAuthRepository(context.env)
       const user = await getAuthenticatedUser(authRepository, context.request)
       if (!user) return jsonResponse({ error: 'unauthorized' }, 401)
+      if (user.mustChangePassword) return jsonResponse({ error: 'password_change_required' }, 403)
 
       const fileRepository = dependencies.createFileRepository(context.env)
       const record = await fileRepository.findFile(user.id, rawId as string)

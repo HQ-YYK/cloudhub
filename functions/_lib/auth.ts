@@ -10,6 +10,9 @@ export const LOGIN_BLOCK_MS = 15 * 60 * 1000
 export interface PublicUser {
   id: string
   username: string
+  role: 'admin' | 'user'
+  mustChangePassword: boolean
+  sessionId: string
 }
 
 const encoder = new TextEncoder()
@@ -115,7 +118,13 @@ export async function getAuthenticatedUser(repository: AuthRepository, request: 
 
   await repository.touchSession(row.session_id, now.toISOString())
 
-  return { id: row.id, username: row.username } satisfies PublicUser
+  return {
+    id: row.id,
+    username: row.username,
+    role: row.role,
+    mustChangePassword: row.must_change_password === 1,
+    sessionId: row.session_id,
+  } satisfies PublicUser
 }
 
 export async function getLoginAttempt(repository: AuthRepository, username: string, ipHash: string) {
