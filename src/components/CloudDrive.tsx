@@ -15,18 +15,18 @@ type DirectoryLevel = {
 
 function FolderIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" aria-hidden="true">
-      <path d="M3 6.75A1.75 1.75 0 0 1 4.75 5h4.1l1.7 1.9h8.7A1.75 1.75 0 0 1 21 8.65v8.6A1.75 1.75 0 0 1 19.25 19H4.75A1.75 1.75 0 0 1 3 17.25v-10.5Z" fill="currentColor" />
-      <path d="M3 9h18v8.25A1.75 1.75 0 0 1 19.25 19H4.75A1.75 1.75 0 0 1 3 17.25V9Z" fill="white" fillOpacity=".28" />
+    <svg viewBox="0 0 24 24" width="26" height="26" fill="none" aria-hidden="true">
+      <path d="M2.75 7.25A2.25 2.25 0 0 1 5 5h4.1l2.05 2.25H19A2.25 2.25 0 0 1 21.25 9.5v7.25A2.25 2.25 0 0 1 19 19H5a2.25 2.25 0 0 1-2.25-2.25V7.25Z" fill="currentColor" />
+      <path d="M2.75 10.25H21.25v6.5A2.25 2.25 0 0 1 19 19H5a2.25 2.25 0 0 1-2.25-2.25v-6.5Z" fill="white" fillOpacity=".22" />
     </svg>
   )
 }
 
 function FileIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true">
-      <path d="M6.75 3.5h7l3.75 3.75v13.25H6.75A1.75 1.75 0 0 1 5 18.75V5.25A1.75 1.75 0 0 1 6.75 3.5Z" fill="currentColor" fillOpacity=".16" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M13.5 3.75V7.5h3.75M8.5 12h7M8.5 15.5h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden="true">
+      <path d="M6 2.75h7.25L18.25 7.8v13.45H6A2.25 2.25 0 0 1 3.75 19V5A2.25 2.25 0 0 1 6 2.75Z" fill="currentColor" fillOpacity=".10" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M13.25 3v5h5M7.5 12h8.75M7.5 15.5h6.75" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }

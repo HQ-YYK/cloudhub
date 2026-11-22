@@ -11,12 +11,21 @@ type Module = {
   icon: string
 }
 
+function DriveIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="21" height="21" fill="none" aria-hidden="true">
+      <path d="M7.25 18.25h9.5a5 5 0 0 0 .82-9.93A6.25 6.25 0 0 0 5.25 9.5a4.38 4.38 0 0 0 2 8.75Z" fill="currentColor" />
+      <path d="M8.5 14.25h7M10.25 16.5h3.5" stroke="white" strokeWidth="1.25" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 export default function Workspace() {
   const { user, logout } = useAuth()
   const [activeModule, setActiveModule] = useState('drive')
   const [logoutError, setLogoutError] = useState('')
   const modules: Module[] = [
-    { id: 'drive', label: '私有云盘', description: '浏览目录并创建文件夹。', icon: '☁' },
+    { id: 'drive', label: '私有云盘', description: '浏览目录并创建文件夹。', icon: 'drive' },
     { id: 'account', label: '账号设置', description: '修改当前用户密码。', icon: '⚙' },
     ...(user?.role === 'admin'
       ? [{ id: 'admin', label: '用户管理', description: '查看和管理用户。', icon: '●' }]
@@ -49,7 +58,9 @@ export default function Workspace() {
               key={module.id}
               onClick={() => setActiveModule(module.id)}
             >
-              <span className="sidebar-icon" aria-hidden="true">{module.icon}</span>
+              <span className={module.id === 'drive' ? 'sidebar-icon sidebar-drive-icon' : 'sidebar-icon'} aria-hidden="true">
+                {module.id === 'drive' ? <DriveIcon /> : module.icon}
+              </span>
               <span>{module.label}</span>
             </button>
           ))}
