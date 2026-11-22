@@ -15,24 +15,25 @@ type DirectoryLevel = {
 
 function FolderIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" aria-hidden="true">
-      <path d="M3 6.75A1.75 1.75 0 0 1 4.75 5h4.1l1.7 1.9h8.7A1.75 1.75 0 0 1 21 8.65v8.6A1.75 1.75 0 0 1 19.25 19H4.75A1.75 1.75 0 0 1 3 17.25v-10.5Z" fill="currentColor" />
-      <path d="M3 9h18v8.25A1.75 1.75 0 0 1 19.25 19H4.75A1.75 1.75 0 0 1 3 17.25V9Z" fill="white" fillOpacity=".28" />
+    <svg viewBox="0 0 24 24" width="26" height="26" fill="none" aria-hidden="true">
+      <path d="M2.75 7.25A2.25 2.25 0 0 1 5 5h4.1l2.05 2.25H19A2.25 2.25 0 0 1 21.25 9.5v7.25A2.25 2.25 0 0 1 19 19H5a2.25 2.25 0 0 1-2.25-2.25V7.25Z" fill="currentColor" />
+      <path d="M2.75 10.25H21.25v6.5A2.25 2.25 0 0 1 19 19H5a2.25 2.25 0 0 1-2.25-2.25v-6.5Z" fill="white" fillOpacity=".22" />
     </svg>
   )
 }
 
 function FileIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true">
-      <path d="M6.75 3.5h7l3.75 3.75v13.25H6.75A1.75 1.75 0 0 1 5 18.75V5.25A1.75 1.75 0 0 1 6.75 3.5Z" fill="currentColor" fillOpacity=".16" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M13.5 3.75V7.5h3.75M8.5 12h7M8.5 15.5h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden="true">
+      <path d="M6 2.75h7.25L18.25 7.8v13.45H6A2.25 2.25 0 0 1 3.75 19V5A2.25 2.25 0 0 1 6 2.75Z" fill="currentColor" fillOpacity=".10" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M13.25 3v5h5M7.5 12h8.75M7.5 15.5h6.75" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }
 
 function requestErrorMessage(error: unknown, action: 'list' | 'create' | 'download' | 'delete') {
   if (error instanceof FilesRequestError) {
+    if (error.code === 'password_change_required') return '请先修改密码'
     if (error.status === 401) return '登录状态已失效，请重新登录后继续。'
     if (error.status === 403) return '请求来源未通过安全校验，请刷新页面后重试。'
     if (error.status === 409) return '当前目录中已经存在同名文件夹。'
@@ -70,6 +71,20 @@ function formatUpdatedAt(value: string) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date)
+}
+
+function displayItemName(name: string, kind: 'file' | 'directory') {
+  const normalized = name.normalize('NFC').trim()
+  const hasReplacementText = normalized.includes('\uFFFD')
+    || /^\?{3,}/u.test(normalized)
+  const hasControlCharacter = [...normalized].some((character) => {
+    const code = character.codePointAt(0) ?? 0
+    return code <= 0x1f || code === 0x7f
+  })
+  if (!normalized || hasReplacementText || hasControlCharacter) {
+    return kind === 'directory' ? '未命名文件夹' : '未命名文件'
+  }
+  return normalized
 }
 
 export default function CloudDrive() {
@@ -233,14 +248,14 @@ export default function CloudDrive() {
               item.kind === 'directory' ? (
                 <button className="drive-folder-card" type="button" key={item.id} onClick={() => enterDirectory(item)}>
                   <span className="drive-folder-icon" aria-hidden="true"><FolderIcon /></span>
-                  <span className="drive-folder-name">{item.name}</span>
+                  <span className="drive-folder-name">{displayItemName(item.name, 'directory')}</span>
                   <span className="drive-folder-action">进入目录</span>
                 </button>
               ) : (
                 <article className="drive-file-card" key={item.id}>
                   <div className="drive-file-heading">
                     <span className="drive-file-icon" aria-hidden="true"><FileIcon /></span>
-                    <strong className="drive-file-name" title={item.name}>{item.name}</strong>
+                    <strong className="drive-file-name" title={displayItemName(item.name, 'file')}>{displayItemName(item.name, 'file')}</strong>
                   </div>
                   <div className="drive-file-meta">
                     <span>{formatFileSize(item.size_bytes)} · {item.mime_type ?? '类型未知'}</span>

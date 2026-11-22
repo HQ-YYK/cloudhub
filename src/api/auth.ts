@@ -1,6 +1,8 @@
 export type AuthUser = {
   id: string
   username: string
+  role: 'admin' | 'user'
+  mustChangePassword: boolean
 }
 
 type AuthResponse = {
@@ -67,4 +69,11 @@ export async function login(username: string, password: string): Promise<AuthUse
 
 export async function logout(): Promise<void> {
   await requestAuth('/api/auth/logout', { method: 'POST' })
+}
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  await requestAuth('/api/auth/password', {
+    method: 'POST',
+    body: JSON.stringify({ currentPassword, newPassword }),
+  })
 }
