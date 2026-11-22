@@ -13,6 +13,24 @@ type DirectoryLevel = {
   name: string
 }
 
+function FolderIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" aria-hidden="true">
+      <path d="M3 6.75A1.75 1.75 0 0 1 4.75 5h4.1l1.7 1.9h8.7A1.75 1.75 0 0 1 21 8.65v8.6A1.75 1.75 0 0 1 19.25 19H4.75A1.75 1.75 0 0 1 3 17.25v-10.5Z" fill="currentColor" />
+      <path d="M3 9h18v8.25A1.75 1.75 0 0 1 19.25 19H4.75A1.75 1.75 0 0 1 3 17.25V9Z" fill="white" fillOpacity=".28" />
+    </svg>
+  )
+}
+
+function FileIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true">
+      <path d="M6.75 3.5h7l3.75 3.75v13.25H6.75A1.75 1.75 0 0 1 5 18.75V5.25A1.75 1.75 0 0 1 6.75 3.5Z" fill="currentColor" fillOpacity=".16" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M13.5 3.75V7.5h3.75M8.5 12h7M8.5 15.5h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 function requestErrorMessage(error: unknown, action: 'list' | 'create' | 'download' | 'delete') {
   if (error instanceof FilesRequestError) {
     if (error.status === 401) return '登录状态已失效，请重新登录后继续。'
@@ -205,7 +223,7 @@ export default function CloudDrive() {
           <p className="drive-state" aria-live="polite">正在加载目录…</p>
         ) : items.length === 0 ? (
           <div className="drive-state">
-            <span className="drive-state-icon" aria-hidden="true">□</span>
+            <span className="drive-state-icon" aria-hidden="true"><FolderIcon /></span>
             <h3>这里还没有文件</h3>
             <p>创建文件夹，开始整理你的云端工作资料。</p>
           </div>
@@ -214,14 +232,14 @@ export default function CloudDrive() {
             {items.map((item) => (
               item.kind === 'directory' ? (
                 <button className="drive-folder-card" type="button" key={item.id} onClick={() => enterDirectory(item)}>
-                  <span className="drive-folder-icon" aria-hidden="true">□</span>
+                  <span className="drive-folder-icon" aria-hidden="true"><FolderIcon /></span>
                   <span className="drive-folder-name">{item.name}</span>
                   <span className="drive-folder-action">进入目录</span>
                 </button>
               ) : (
                 <article className="drive-file-card" key={item.id}>
                   <div className="drive-file-heading">
-                    <span className="drive-file-icon" aria-hidden="true">▤</span>
+                    <span className="drive-file-icon" aria-hidden="true"><FileIcon /></span>
                     <strong className="drive-file-name" title={item.name}>{item.name}</strong>
                   </div>
                   <div className="drive-file-meta">

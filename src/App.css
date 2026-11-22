@@ -89,7 +89,7 @@
 .drive-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
 .drive-folder-card { display: grid; grid-template-columns: auto 1fr; gap: 3px 11px; padding: 16px; color: var(--ink); background: #fbfcff; border: 1px solid #e1e6f0; border-radius: 10px; text-align: left; transition: border .2s, box-shadow .2s, transform .2s; }
 .drive-folder-card:hover { border-color: #b8c9f5; box-shadow: 0 8px 20px rgba(44, 70, 126, .08); transform: translateY(-1px); }
-.drive-folder-icon { grid-row: span 2; color: var(--blue); font-size: 24px; line-height: 1; }
+.drive-folder-icon { display: grid; place-items: center; grid-row: span 2; width: 24px; height: 24px; color: var(--blue); line-height: 1; }
 .drive-folder-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; }
 .drive-folder-action { color: #9aa5b7; font-size: 10px; }
 .drive-file-card { display: grid; gap: 13px; padding: 16px; background: #fff; border: 1px solid #e1e6f0; border-radius: 10px; }
