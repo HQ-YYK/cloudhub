@@ -27,6 +27,7 @@ export class FileServiceError extends Error {
     | 'cleanup_failed'
     | 'delete_failed'
     | 'conflict'
+    | 'password_change_required'
 
   constructor(code: FileServiceError['code'], options?: ErrorOptions) {
     super(code, options)
@@ -72,6 +73,7 @@ export async function listFiles(
 ) {
   const user = await getAuthenticatedUser(authRepository, request)
   if (!user) throw new FileServiceError('unauthorized')
+  if (user.mustChangePassword) throw new FileServiceError('password_change_required')
   if (parentId !== null) {
     validateFileId(parentId)
     const parent = await fileRepository.findDirectory(user.id, parentId)
@@ -89,6 +91,7 @@ export async function createDirectory(
 ) {
   const user = await getAuthenticatedUser(authRepository, request)
   if (!user) throw new FileServiceError('unauthorized')
+  if (user.mustChangePassword) throw new FileServiceError('password_change_required')
   if (parentId !== null) {
     validateFileId(parentId)
     const parent = await fileRepository.findDirectory(user.id, parentId)
@@ -123,6 +126,7 @@ export async function transitionFileStorage(
 ) {
   const user = await getAuthenticatedUser(authRepository, request)
   if (!user) throw new FileServiceError('unauthorized')
+  if (user.mustChangePassword) throw new FileServiceError('password_change_required')
   validateFileId(fileId)
   try {
     assertFileStorageTransition(from, to)
@@ -144,6 +148,7 @@ export async function deleteFile(
 ) {
   const user = await getAuthenticatedUser(authRepository, request)
   if (!user) throw new FileServiceError('unauthorized')
+  if (user.mustChangePassword) throw new FileServiceError('password_change_required')
   validateFileId(fileId)
 
   const record = await fileRepository.findFile(user.id, fileId)

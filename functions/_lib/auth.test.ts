@@ -77,6 +77,12 @@ function repository(firstResult: unknown = null) {
     createSession: async () => undefined,
     deleteSessionByTokenHash: async () => undefined,
     revokeAllSessions: async () => undefined,
+    listUsers: async () => [],
+    findUserById: async () => null,
+    createUser: async () => { throw new Error('not_used') },
+    updatePassword: async () => undefined,
+    setDisabled: async () => undefined,
+    revokeOtherSessions: async () => undefined,
   }
   return { authRepository, get touchCount() { return touchCount } }
 }
@@ -130,10 +136,13 @@ test('authenticated user lookup rejects an expired or disabled session', async (
   const request = new Request('https://cloudhub.test/api/auth/me', {
     headers: { Cookie: sessionCookie('test-token') },
   })
-  const validRepository = repository({ session_id: 'session-1', id: 'user-1', username: 'alice' })
+  const validRepository = repository({ session_id: 'session-1', id: 'user-1', username: 'alice', role: 'user', must_change_password: 0 })
   assert.deepEqual(await getAuthenticatedUser(validRepository.authRepository, request), {
     id: 'user-1',
     username: 'alice',
+    role: 'user',
+    mustChangePassword: false,
+    sessionId: 'session-1',
   })
   assert.equal(validRepository.touchCount, 1)
   assert.equal(await getAuthenticatedUser(repository().authRepository, request), null)
@@ -244,6 +253,34 @@ test('me rejects a request without a session', async () => {
   } as never)
   assert.equal(response.status, 401)
   assert.deepEqual(await response.json(), { error: 'unauthorized' })
+})
+
+test('me returns only public user fields', async () => {
+  const db = {
+    prepare: (sql: string) => ({
+      bind: () => ({
+        first: async () => sql.includes('FROM sessions')
+          ? { session_id: 'session-1', id: 'user-1', username: 'alice', role: 'admin', must_change_password: 0 }
+          : null,
+        run: async () => ({ success: true }),
+      }),
+    }),
+  } as unknown as D1Database
+  const response = await me({
+    request: new Request('https://cloudhub.test/api/auth/me', {
+      headers: { Cookie: 'cloudhub_session=valid-token' },
+    }),
+    env: { DB: db },
+  } as never)
+  assert.equal(response.status, 200)
+  const body = await response.json() as { user: Record<string, unknown> }
+  assert.deepEqual(body.user, {
+    id: 'user-1',
+    username: 'alice',
+    role: 'admin',
+    mustChangePassword: false,
+  })
+  assert.equal('sessionId' in body.user, false)
 })
 
 test('logout deletes the hashed session and clears the cookie', async () => {

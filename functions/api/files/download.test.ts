@@ -24,7 +24,7 @@ function authRepository(authenticated = true, userId = ownerId): AuthRepository 
   return {
     findUser: async () => null,
     findSessionUser: async () => authenticated
-      ? { session_id: 'session', id: userId, username: 'alice' }
+      ? { session_id: 'session', id: userId, username: 'alice', role: 'user', must_change_password: 0 }
       : null,
     touchSession: async () => undefined,
     findLoginAttempt: async () => null,
@@ -33,6 +33,12 @@ function authRepository(authenticated = true, userId = ownerId): AuthRepository 
     createSession: async () => undefined,
     deleteSessionByTokenHash: async () => undefined,
     revokeAllSessions: async () => undefined,
+    listUsers: async () => [],
+    findUserById: async () => null,
+    createUser: async () => { throw new Error('not_used') },
+    updatePassword: async () => undefined,
+    setDisabled: async () => undefined,
+    revokeOtherSessions: async () => undefined,
   }
 }
 

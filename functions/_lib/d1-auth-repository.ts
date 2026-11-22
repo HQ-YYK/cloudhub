@@ -1,17 +1,21 @@
 import type { D1Database } from '@cloudflare/workers-types'
+import {
+  AuthRepositoryConflictError,
+} from './auth-repository.ts'
 import type {
   AuthRepository,
   LoginAttempt,
   NewSession,
   SessionUser,
   StoredUser,
+  UserSummary,
 } from './auth-repository.ts'
 
 export function createD1AuthRepository(db: D1Database): AuthRepository {
   return {
     async findUser(username: string) {
       return db.prepare(`
-        SELECT id, username, password_hash, password_salt, password_iterations, disabled
+        SELECT id, username, password_hash, password_salt, password_iterations, disabled, role, must_change_password
         FROM users
         WHERE username = ?
         LIMIT 1
@@ -20,7 +24,7 @@ export function createD1AuthRepository(db: D1Database): AuthRepository {
 
     async findSessionUser(tokenHash: string, now: string) {
       return db.prepare(`
-        SELECT s.id AS session_id, u.id, u.username
+        SELECT s.id AS session_id, u.id, u.username, u.role, u.must_change_password
         FROM sessions s
         INNER JOIN users u ON u.id = s.user_id
         WHERE s.token_hash = ?
@@ -116,6 +120,80 @@ export function createD1AuthRepository(db: D1Database): AuthRepository {
 
     async revokeAllSessions(userId: string) {
       await db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId).run()
+    },
+
+    async listUsers() {
+      const result = await db.prepare(`
+        SELECT id, username, role, disabled, must_change_password, created_at, updated_at
+        FROM users
+        ORDER BY created_at
+      `).all<UserSummary>()
+      return result.results
+    },
+
+    async findUserById(id: string) {
+      return db.prepare(`
+        SELECT id, username, role, disabled, must_change_password, created_at, updated_at
+        FROM users
+        WHERE id = ?
+        LIMIT 1
+      `).bind(id).first<UserSummary>()
+    },
+
+    async createUser(input) {
+      try {
+        await db.prepare(`
+          INSERT INTO users (
+            id, username, password_hash, password_salt, password_iterations,
+            created_at, updated_at, disabled, role, must_change_password
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+        `).bind(
+          input.id,
+          input.username,
+          input.passwordHash,
+          input.passwordSalt,
+          input.passwordIterations,
+          input.createdAt,
+          input.createdAt,
+          input.role,
+          input.mustChangePassword,
+        ).run()
+      } catch (error) {
+        const details = String(error)
+        if (details.includes('UNIQUE') || details.includes('unique')) {
+          throw new AuthRepositoryConflictError('username_taken')
+        }
+        throw error
+      }
+      const created = await db.prepare(`
+        SELECT id, username, role, disabled, must_change_password, created_at, updated_at
+        FROM users
+        WHERE id = ?
+        LIMIT 1
+      `).bind(input.id).first<UserSummary>()
+      if (!created) throw new Error('created_user_not_found')
+      return created
+    },
+
+    async updatePassword(userId, hash, salt, iterations, mustChangePassword, updatedAt) {
+      await db.prepare(`
+        UPDATE users
+        SET password_hash = ?, password_salt = ?, password_iterations = ?,
+            must_change_password = ?, updated_at = ?
+        WHERE id = ?
+      `).bind(hash, salt, iterations, mustChangePassword, updatedAt, userId).run()
+    },
+
+    async setDisabled(userId, disabled, updatedAt) {
+      await db.prepare(`
+        UPDATE users SET disabled = ?, updated_at = ? WHERE id = ?
+      `).bind(disabled, updatedAt, userId).run()
+    },
+
+    async revokeOtherSessions(userId, keepSessionId) {
+      await db.prepare(`
+        DELETE FROM sessions WHERE user_id = ? AND id != ?
+      `).bind(userId, keepSessionId).run()
     },
   }
 }

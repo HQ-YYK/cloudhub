@@ -17,6 +17,7 @@ interface DeleteDependencies {
 
 function serviceErrorResponse(error: FileServiceError) {
   if (error.code === 'unauthorized') return jsonResponse({ error: 'unauthorized' }, 401)
+  if (error.code === 'password_change_required') return jsonResponse({ error: 'password_change_required' }, 403)
   if (error.code === 'invalid_parent') return jsonResponse({ error: 'invalid_request' }, 400)
   if (error.code === 'resource_not_found') return jsonResponse({ error: 'not_found' }, 404)
   if (error.code === 'conflict') return jsonResponse({ error: 'conflict' }, 409)

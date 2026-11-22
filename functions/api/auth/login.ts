@@ -60,6 +60,8 @@ export const onRequest: PagesFunction<AuthEnv> = async (context) => {
       password_salt: 'A'.repeat(22),
       password_iterations: PASSWORD_ITERATIONS,
       disabled: 1,
+      role: 'user',
+      must_change_password: 1,
     }
     const passwordMatches = await verifyPassword(
       payload.password,
@@ -89,7 +91,12 @@ export const onRequest: PagesFunction<AuthEnv> = async (context) => {
     })
     await clearLoginFailures(repository, payload.username, ipHash)
 
-    return jsonResponse({ user: { id: user.id, username: user.username } }, 200, {
+    return jsonResponse({ user: {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      mustChangePassword: user.must_change_password === 1,
+    } }, 200, {
       'Set-Cookie': sessionCookie(token),
     })
   } catch (error) {
