@@ -63,7 +63,7 @@
 .drive-breadcrumbs button:not(:disabled):hover { color: var(--blue); }
 .drive-breadcrumbs button:disabled { color: var(--ink); font-weight: 650; }
 .breadcrumb-separator { margin: 0 8px; color: #c4cad6; }
-.drive-actions { display: flex; align-items: flex-start; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.drive-actions { display: flex; align-items: flex-end; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .secondary-small-button { height: 40px; padding: 0 13px; color: #5d6b83; background: #fff; border: 1px solid #dce3ef; border-radius: 8px; font-size: 12px; font-weight: 700; }
 .secondary-small-button:hover:not(:disabled) { color: var(--blue); border-color: #b8c9f5; }
 .secondary-small-button:disabled { cursor: wait; opacity: .65; }

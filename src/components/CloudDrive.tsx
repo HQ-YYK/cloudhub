@@ -58,6 +58,7 @@ export default function CloudDrive() {
   const [levels, setLevels] = useState<DirectoryLevel[]>([{ id: null, name: '我的云盘' }])
   const [items, setItems] = useState<DriveItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [folderName, setFolderName] = useState('')
   const [creating, setCreating] = useState(false)
@@ -67,16 +68,18 @@ export default function CloudDrive() {
   const [actionError, setActionError] = useState('')
   const current = levels[levels.length - 1]
 
-  const loadDirectory = useCallback(async (parentId: string | null) => {
-    setLoading(true)
+  const loadDirectory = useCallback(async (parentId: string | null, mode: 'initial' | 'refresh' = 'initial') => {
+    if (mode === 'initial') setLoading(true)
+    else setRefreshing(true)
     setLoadError('')
     try {
       setItems(await listFiles(parentId))
     } catch (error) {
-      setItems([])
+      if (mode === 'initial') setItems([])
       setLoadError(requestErrorMessage(error, 'list'))
     } finally {
-      setLoading(false)
+      if (mode === 'initial') setLoading(false)
+      else setRefreshing(false)
     }
   }, [])
 
@@ -113,7 +116,7 @@ export default function CloudDrive() {
     try {
       await createDirectory(name, current.id)
       setFolderName('')
-      await loadDirectory(current.id)
+      await loadDirectory(current.id, 'refresh')
     } catch (error) {
       setCreateError(requestErrorMessage(error, 'create'))
     } finally {
@@ -139,7 +142,7 @@ export default function CloudDrive() {
     setActionError('')
     try {
       await deleteFile(item.id)
-      await loadDirectory(current.id)
+      await loadDirectory(current.id, 'refresh')
     } catch (error) {
       setActionError(requestErrorMessage(error, 'delete'))
     } finally {
@@ -165,8 +168,8 @@ export default function CloudDrive() {
           </nav>
         </div>
         <div className="drive-actions">
-          <button className="secondary-small-button" type="button" onClick={() => void loadDirectory(current.id)} disabled={loading}>
-            刷新
+          <button className="secondary-small-button" type="button" onClick={() => void loadDirectory(current.id, 'refresh')} disabled={loading || refreshing}>
+            {refreshing ? '刷新中…' : '刷新'}
           </button>
           <form className="new-folder-form" onSubmit={handleCreateDirectory}>
             <label htmlFor="new-folder-name">新建文件夹</label>
@@ -194,7 +197,7 @@ export default function CloudDrive() {
       {loadError && (
         <div className="drive-alert" role="alert">
           <span>{loadError}</span>
-          <button type="button" onClick={() => void loadDirectory(current.id)}>重试</button>
+          <button type="button" onClick={() => void loadDirectory(current.id, 'refresh')}>重试</button>
         </div>
       )}
       <div className="drive-list-panel">
