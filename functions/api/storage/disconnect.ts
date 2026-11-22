@@ -3,6 +3,7 @@ import { getAuthenticatedUser } from '../../_lib/auth.ts'
 import { createD1AuthRepository } from '../../_lib/d1-auth-repository.ts'
 import type { AuthEnv } from '../../_lib/cloudflare-env.ts'
 import { createD1StorageRepository } from '../../_lib/d1-storage-repository.ts'
+import { clearAccessTokenCache } from '../../_lib/google-oauth.ts'
 import { decryptSecret } from '../../_lib/secret-box.ts'
 import { jsonResponse, methodNotAllowed, sameOriginRequest } from '../../_lib/http.ts'
 
@@ -58,6 +59,7 @@ export function createStorageDisconnectHandler(
         }
       }
       await storageRepository.deleteAccount()
+      clearAccessTokenCache()
       return jsonResponse({ ok: true })
     } catch (error) {
       console.error('Storage disconnect failed', error instanceof Error ? error.name : 'unknown_error')

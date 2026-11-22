@@ -1,6 +1,7 @@
 import type { PagesFunction } from '@cloudflare/workers-types'
 import type { AuthEnv } from '../../_lib/cloudflare-env.ts'
 import { createD1StorageRepository } from '../../_lib/d1-storage-repository.ts'
+import { clearAccessTokenCache } from '../../_lib/google-oauth.ts'
 import { encryptSecret } from '../../_lib/secret-box.ts'
 import { sha256 } from '../../_lib/auth.ts'
 
@@ -149,6 +150,7 @@ export function createStorageCallbackHandler(
         created_at: existing?.created_at ?? now,
         updated_at: now,
       })
+      clearAccessTokenCache()
       return redirect('/?storage=connected')
     } catch (error) {
       console.error('Storage callback failed', error instanceof Error ? error.name : 'unknown_error')
