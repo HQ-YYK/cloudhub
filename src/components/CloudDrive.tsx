@@ -33,6 +33,7 @@ function FileIcon() {
 
 function requestErrorMessage(error: unknown, action: 'list' | 'create' | 'download' | 'delete') {
   if (error instanceof FilesRequestError) {
+    if (error.code === 'password_change_required') return '请先修改密码'
     if (error.status === 401) return '登录状态已失效，请重新登录后继续。'
     if (error.status === 403) return '请求来源未通过安全校验，请刷新页面后重试。'
     if (error.status === 409) return '当前目录中已经存在同名文件夹。'

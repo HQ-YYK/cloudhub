@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useAuth } from '../auth/useAuth'
 import CloudDrive from './CloudDrive'
+import ChangePassword from './ChangePassword'
+import AdminUsers from './AdminUsers'
 
 type Module = {
   id: string
@@ -9,14 +11,17 @@ type Module = {
   icon: string
 }
 
-const modules: Module[] = [
-  { id: 'drive', label: '私有云盘', description: '浏览目录并创建文件夹。', icon: '☁' },
-]
-
 export default function Workspace() {
   const { user, logout } = useAuth()
   const [activeModule, setActiveModule] = useState('drive')
   const [logoutError, setLogoutError] = useState('')
+  const modules: Module[] = [
+    { id: 'drive', label: '私有云盘', description: '浏览目录并创建文件夹。', icon: '☁' },
+    { id: 'account', label: '账号设置', description: '修改当前用户密码。', icon: '⚙' },
+    ...(user?.role === 'admin'
+      ? [{ id: 'admin', label: '用户管理', description: '查看和管理用户。', icon: '●' }]
+      : []),
+  ]
   const active = modules.find((module) => module.id === activeModule) ?? modules[0]
 
   async function handleLogout() {
@@ -67,6 +72,8 @@ export default function Workspace() {
         </header>
         {logoutError && <p className="workspace-alert" role="alert">{logoutError}</p>}
         {activeModule === 'drive' && <CloudDrive />}
+        {activeModule === 'account' && <ChangePassword />}
+        {activeModule === 'admin' && user?.role === 'admin' && <AdminUsers />}
       </main>
     </div>
   )

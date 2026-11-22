@@ -9,6 +9,7 @@ export type AuthContextValue = {
   error: string | null
   login: (username: string, password: string) => Promise<void>
   logout: () => Promise<void>
+  passwordChanged: () => void
   clearError: () => void
 }
 
