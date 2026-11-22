@@ -85,7 +85,7 @@
 .drive-alert button:hover { color: #7e303d; }
 .drive-list-panel { min-height: 260px; padding: 24px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
 .drive-state { display: grid; justify-items: center; min-height: 210px; align-content: center; margin: 0; text-align: center; }
-.drive-state-icon { display: grid; place-items: center; width: 45px; height: 45px; margin-bottom: 13px; color: var(--blue); background: #edf2ff; border-radius: 12px; font-size: 24px; }
+.drive-state-icon { display: grid; place-items: center; width: 45px; height: 45px; margin-bottom: 13px; color: #8692a7; background: #edf2ff; border-radius: 12px; font-size: 24px; }
 .drive-state h3 { margin: 0 0 7px; font-size: 15px; }
 .drive-state p { margin: 0; color: var(--muted); font-size: 12px; }
 .drive-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }

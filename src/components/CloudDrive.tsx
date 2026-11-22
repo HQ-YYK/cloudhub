@@ -24,9 +24,20 @@ function FolderIcon() {
 
 function FileIcon() {
   return (
-    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden="true">
-      <path d="M6 2.75h7.25L18.25 7.8v13.45H6A2.25 2.25 0 0 1 3.75 19V5A2.25 2.25 0 0 1 6 2.75Z" fill="currentColor" fillOpacity=".10" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-      <path d="M13.25 3v5h5M7.5 12h8.75M7.5 15.5h6.75" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    <svg viewBox="0 0 24 24" width="26" height="26" fill="none" aria-hidden="true">
+      <path d="M6.25 2.75h7.5l4 4v14.5H6.25a1.5 1.5 0 0 1-1.5-1.5V4.25a1.5 1.5 0 0 1 1.5-1.5Z" fill="#f0edff" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+      <path d="M13.75 2.75v4.25h4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+      <path d="M8 11.25h8M8 14.75h8M8 18.25h5.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function EmptyIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="26" height="26" fill="none" aria-hidden="true">
+      <path d="M3.5 8.25h17l-1.25 10.5H4.75L3.5 8.25Z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M8 8.25V6.5a4 4 0 0 1 8 0v1.75" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M3.75 13.25h5l1.25 1.5h4l1.25-1.5h5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
     </svg>
   )
 }
@@ -76,7 +87,6 @@ function formatUpdatedAt(value: string) {
 function displayItemName(name: string, kind: 'file' | 'directory') {
   const normalized = name.normalize('NFC').trim()
   const hasReplacementText = normalized.includes('\uFFFD')
-    || /^\?{3,}/u.test(normalized)
   const hasControlCharacter = [...normalized].some((character) => {
     const code = character.codePointAt(0) ?? 0
     return code <= 0x1f || code === 0x7f
@@ -238,7 +248,7 @@ export default function CloudDrive() {
           <p className="drive-state" aria-live="polite">正在加载目录…</p>
         ) : items.length === 0 ? (
           <div className="drive-state">
-            <span className="drive-state-icon" aria-hidden="true"><FolderIcon /></span>
+            <span className="drive-state-icon" aria-hidden="true"><EmptyIcon /></span>
             <h3>这里还没有文件</h3>
             <p>创建文件夹，开始整理你的云端工作资料。</p>
           </div>
