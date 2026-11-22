@@ -73,6 +73,20 @@ function formatUpdatedAt(value: string) {
   }).format(date)
 }
 
+function displayItemName(name: string, kind: 'file' | 'directory') {
+  const normalized = name.normalize('NFC').trim()
+  const hasReplacementText = normalized.includes('\uFFFD')
+    || /^\?{3,}/u.test(normalized)
+  const hasControlCharacter = [...normalized].some((character) => {
+    const code = character.codePointAt(0) ?? 0
+    return code <= 0x1f || code === 0x7f
+  })
+  if (!normalized || hasReplacementText || hasControlCharacter) {
+    return kind === 'directory' ? '未命名文件夹' : '未命名文件'
+  }
+  return normalized
+}
+
 export default function CloudDrive() {
   const [levels, setLevels] = useState<DirectoryLevel[]>([{ id: null, name: '我的云盘' }])
   const [items, setItems] = useState<DriveItem[]>([])
@@ -234,14 +248,14 @@ export default function CloudDrive() {
               item.kind === 'directory' ? (
                 <button className="drive-folder-card" type="button" key={item.id} onClick={() => enterDirectory(item)}>
                   <span className="drive-folder-icon" aria-hidden="true"><FolderIcon /></span>
-                  <span className="drive-folder-name">{item.name}</span>
+                  <span className="drive-folder-name">{displayItemName(item.name, 'directory')}</span>
                   <span className="drive-folder-action">进入目录</span>
                 </button>
               ) : (
                 <article className="drive-file-card" key={item.id}>
                   <div className="drive-file-heading">
                     <span className="drive-file-icon" aria-hidden="true"><FileIcon /></span>
-                    <strong className="drive-file-name" title={item.name}>{item.name}</strong>
+                    <strong className="drive-file-name" title={displayItemName(item.name, 'file')}>{displayItemName(item.name, 'file')}</strong>
                   </div>
                   <div className="drive-file-meta">
                     <span>{formatFileSize(item.size_bytes)} · {item.mime_type ?? '类型未知'}</span>
