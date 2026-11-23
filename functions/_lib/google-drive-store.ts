@@ -8,7 +8,7 @@ export class GoogleDriveStore implements BlobStore {
   private readonly repository: StorageRepository
   private readonly fetchImpl: typeof fetch
 
-  constructor(env: AuthEnv, repository: StorageRepository, fetchImpl: typeof fetch = fetch) {
+  constructor(env: AuthEnv, repository: StorageRepository, fetchImpl: typeof fetch = (input, init) => fetch(input, init)) {
     this.env = env
     this.repository = repository
     this.fetchImpl = fetchImpl
