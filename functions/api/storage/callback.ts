@@ -51,7 +51,7 @@ export function createStorageCallbackHandler(
       if (!env.DB) throw new Error('database_configuration_missing')
       return createD1StorageRepository(env.DB)
     },
-    fetchImpl: fetch,
+    fetchImpl: ((input, init) => fetch(input, init)) as typeof fetch,
     ...overrides,
   }
 

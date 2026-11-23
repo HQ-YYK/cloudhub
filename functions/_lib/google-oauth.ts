@@ -12,7 +12,7 @@ export function clearAccessTokenCache() {
 export async function getAccessToken(
   env: AuthEnv,
   repository: StorageRepository,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = (input, init) => fetch(input, init),
 ) {
   if (accessTokenCache && accessTokenCache.expiresAt > Date.now() + 60_000) {
     return accessTokenCache.token
