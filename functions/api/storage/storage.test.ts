@@ -152,7 +152,7 @@ test('storage callback fails without refresh token and saves ciphertext on succe
     env: env(),
   } as never)
   assert.equal(response.status, 302)
-  assert.equal(response.headers.get('Location'), '/?storage=failed')
+  assert.equal(response.headers.get('Location'), '/?storage=failed&reason=token_incomplete')
 
   const current = storageRepository({
     state: { state_hash: 'hash', user_id: 'user-1', expires_at: '2030-01-01T00:00:00.000Z' },
