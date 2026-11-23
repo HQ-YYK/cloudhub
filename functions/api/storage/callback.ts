@@ -16,6 +16,23 @@ function base64UrlDecode(value: string) {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0))
 }
 
+function failed(reason: string, detail?: string) {
+  console.error('Storage callback failed', reason, detail ?? '')
+  return redirect(`/?storage=failed&reason=${encodeURIComponent(reason)}`)
+}
+
+async function googleErrorCode(response: Response) {
+  try {
+    const payload = await response.clone().json() as {
+      error?: string | { status?: string, errors?: { reason?: string }[] }
+    }
+    if (typeof payload.error === 'string') return payload.error
+    return payload.error?.errors?.[0]?.reason ?? payload.error?.status ?? ''
+  } catch {
+    return ''
+  }
+}
+
 function errorPage() {
   return new Response('Invalid or expired authorization state.', {
     status: 400,
@@ -48,7 +65,7 @@ export function createStorageCallbackHandler(
       || !context.env.GOOGLE_CLIENT_SECRET
       || !context.env.STORAGE_ENCRYPTION_KEY
     ) {
-      return redirect('/?storage=failed')
+      return failed('not_configured')
     }
 
     try {
@@ -65,12 +82,12 @@ export function createStorageCallbackHandler(
       if (!oauthState) return errorPage()
 
       const admin = await storageRepository.findAdminUserById(oauthState.user_id)
-      if (!admin) return redirect('/?storage=failed')
+      if (!admin) return failed('not_admin')
 
       if (url.searchParams.has('error')) return redirect('/?storage=denied')
 
       const code = url.searchParams.get('code')
-      if (!code) return redirect('/?storage=failed')
+      if (!code) return failed('missing_code')
 
       const redirectUri = new URL('/api/storage/callback', context.request.url).toString()
       const tokenBody = new URLSearchParams({
@@ -85,22 +102,28 @@ export function createStorageCallbackHandler(
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: tokenBody,
       })
-      if (!tokenResponse.ok) return redirect('/?storage=failed')
+      if (!tokenResponse.ok) {
+        return failed('token_exchange', `${tokenResponse.status} ${await googleErrorCode(tokenResponse)}`)
+      }
       const tokenPayload = await tokenResponse.json() as {
         refresh_token?: string
         id_token?: string
         access_token?: string
       }
       if (!tokenPayload.refresh_token || !tokenPayload.access_token || !tokenPayload.id_token) {
-        return redirect('/?storage=failed')
+        return failed('token_incomplete', [
+          tokenPayload.refresh_token ? '' : 'no_refresh',
+          tokenPayload.access_token ? '' : 'no_access',
+          tokenPayload.id_token ? '' : 'no_id',
+        ].join(' ').trim())
       }
 
       const idPayloadSegment = tokenPayload.id_token.split('.')[1]
-      if (!idPayloadSegment) return redirect('/?storage=failed')
+      if (!idPayloadSegment) return failed('id_token_invalid')
       const idPayload = JSON.parse(new TextDecoder().decode(base64UrlDecode(idPayloadSegment))) as {
         email?: string
       }
-      if (!idPayload.email) return redirect('/?storage=failed')
+      if (!idPayload.email) return failed('no_email')
 
       const existing = await storageRepository.getAccount()
       let rootFolderId: string | null = null
@@ -129,9 +152,11 @@ export function createStorageCallbackHandler(
             mimeType: 'application/vnd.google-apps.folder',
           }),
         })
-        if (!folderResponse.ok) return redirect('/?storage=failed')
+        if (!folderResponse.ok) {
+          return failed('drive_folder', `${folderResponse.status} ${await googleErrorCode(folderResponse)}`)
+        }
         const folderPayload = await folderResponse.json() as { id?: string }
-        if (!folderPayload.id) return redirect('/?storage=failed')
+        if (!folderPayload.id) return failed('drive_folder_no_id')
         rootFolderId = folderPayload.id
       }
 
@@ -153,8 +178,7 @@ export function createStorageCallbackHandler(
       clearAccessTokenCache()
       return redirect('/?storage=connected')
     } catch (error) {
-      console.error('Storage callback failed', error instanceof Error ? error.name : 'unknown_error')
-      return redirect('/?storage=failed')
+      return failed('exception', error instanceof Error ? error.name : 'unknown_error')
     }
   }
 }
