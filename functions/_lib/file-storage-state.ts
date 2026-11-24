@@ -4,7 +4,7 @@ const transitions: Record<FileStorageStatus, readonly FileStorageStatus[]> = {
   pending: ['ready', 'failed', 'deleting'],
   ready: ['deleting'],
   failed: ['pending', 'deleting'],
-  deleting: ['failed'],
+  deleting: ['failed', 'ready'],
 }
 
 export class FileStorageStateError extends Error {

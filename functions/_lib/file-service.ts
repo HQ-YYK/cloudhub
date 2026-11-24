@@ -198,7 +198,9 @@ export async function deleteFile(
   }
 }
 
-export function publicFileRecord(record: FileRecord) {
+export function publicFileRecord(
+  record: Pick<FileRecord, 'id' | 'parent_id' | 'kind' | 'name' | 'size_bytes' | 'mime_type' | 'created_at' | 'updated_at'>,
+) {
   return {
     id: record.id,
     parent_id: record.parent_id,

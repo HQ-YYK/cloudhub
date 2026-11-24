@@ -72,4 +72,26 @@ export class GoogleDriveClient {
     if (response.status === 404) return
     if (!response.ok) throw new BlobStoreError('unavailable', 'google_drive_trash_failed')
   }
+
+  async untrash(id: string): Promise<void> {
+    const response = await this.authorizedFetch(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trashed: false }),
+      },
+    )
+    if (response.status === 404) throw new BlobStoreError('not_found', 'drive_object_not_found')
+    if (!response.ok) throw new BlobStoreError('unavailable', 'google_drive_untrash_failed')
+  }
+
+  async deletePermanently(id: string): Promise<void> {
+    const response = await this.authorizedFetch(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+    )
+    if (response.status === 404) throw new BlobStoreError('not_found', 'drive_object_not_found')
+    if (!response.ok) throw new BlobStoreError('unavailable', 'google_drive_delete_failed')
+  }
 }

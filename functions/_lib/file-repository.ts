@@ -18,6 +18,7 @@ export interface FileRecord {
   storage_status: FileStorageStatus
   drive_folder_id?: string | null
   md5?: string | null
+  purged_at?: string | null
 }
 
 export interface NewDirectory {
@@ -95,4 +96,30 @@ export interface FileRepository {
     deletedAt: string,
     updatedAt: string,
   ): Promise<FileRecord | null>
+}
+
+export interface TrashItem {
+  id: string
+  owner_id: string
+  parent_id: string | null
+  kind: FileKind
+  name: string
+  name_key: string
+  object_key: string | null
+  size_bytes: number | null
+  mime_type: string | null
+  created_at: string
+  updated_at: string
+  deleted_at: string
+  parent_name: string | null
+}
+
+export interface TrashRepository {
+  listTrash(ownerId: string, cutoff: string): Promise<TrashItem[]>
+  findTrashFile(ownerId: string, id: string, cutoff: string): Promise<TrashItem | null>
+  hasActiveNameConflict(ownerId: string, parentId: string | null, nameKey: string): Promise<boolean>
+  restoreFile(ownerId: string, id: string, updatedAt: string): Promise<FileRecord | null>
+  markFilePurged(ownerId: string, id: string, purgedAt: string): Promise<void>
+  listTrashObjectKeys(ownerId: string, cutoff: string, limit: number): Promise<Array<{ id: string, object_key: string }>>
+  countTrash(ownerId: string, cutoff: string): Promise<number>
 }

@@ -5,6 +5,8 @@ import {
   type FileRepository,
   type NewDirectory,
   type NewPendingFile,
+  type TrashItem,
+  type TrashRepository,
   type UploadRepository,
   type UploadSession,
 } from './file-repository.ts'
@@ -14,7 +16,7 @@ function isActiveNameConflict(error: unknown) {
   return /unique constraint failed: index ['"]?idx_files_active_name['"]?/iu.test(message)
 }
 
-export function createD1FileRepository(db: D1Database): FileRepository & UploadRepository {
+export function createD1FileRepository(db: D1Database): FileRepository & UploadRepository & TrashRepository {
   return {
     async listChildren(ownerId, parentId) {
       return db.prepare(`
@@ -180,6 +182,126 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
       `).bind(id, ownerId).first<FileRecord>()
       if (!deleted || deleted.deleted_at !== deletedAt) throw new Error('deleted_file_not_found')
       return deleted
+    },
+
+    async listTrash(ownerId, cutoff) {
+      return db.prepare(`
+        SELECT f.id, f.owner_id, f.parent_id, f.kind, f.name, f.name_key, f.object_key,
+               f.size_bytes, f.mime_type, f.created_at, f.updated_at, f.deleted_at,
+               parent.name AS parent_name
+        FROM files f
+        LEFT JOIN files parent
+          ON parent.id = f.parent_id AND parent.owner_id = f.owner_id
+        WHERE f.owner_id = ?
+          AND f.kind = 'file'
+          AND f.deleted_at IS NOT NULL
+          AND f.purged_at IS NULL
+          AND f.deleted_at > ?
+        ORDER BY f.deleted_at DESC
+        LIMIT 500
+      `).bind(ownerId, cutoff).all<TrashItem>().then((result) => result.results)
+    },
+
+    async findTrashFile(ownerId, id, cutoff) {
+      return db.prepare(`
+        SELECT f.id, f.owner_id, f.parent_id, f.kind, f.name, f.name_key, f.object_key,
+               f.size_bytes, f.mime_type, f.created_at, f.updated_at, f.deleted_at,
+               parent.name AS parent_name
+        FROM files f
+        LEFT JOIN files parent
+          ON parent.id = f.parent_id AND parent.owner_id = f.owner_id
+        WHERE f.id = ?
+          AND f.owner_id = ?
+          AND f.kind = 'file'
+          AND f.deleted_at IS NOT NULL
+          AND f.purged_at IS NULL
+          AND f.deleted_at > ?
+        LIMIT 1
+      `).bind(id, ownerId, cutoff).first<TrashItem>()
+    },
+
+    async hasActiveNameConflict(ownerId, parentId, nameKey) {
+      const row = await db.prepare(`
+        SELECT 1 AS one
+        FROM files
+        WHERE owner_id = ?
+          AND COALESCE(parent_id, '') = ?
+          AND name_key = ?
+          AND deleted_at IS NULL
+          AND (kind = 'directory' OR storage_status IN ('pending', 'ready', 'deleting'))
+        LIMIT 1
+      `).bind(ownerId, parentId ?? '', nameKey).first<{ one: number }>()
+      return row !== null
+    },
+
+    async restoreFile(ownerId, id, updatedAt) {
+      let result
+      try {
+        result = await db.prepare(`
+          UPDATE files
+          SET deleted_at = NULL, storage_status = 'ready', updated_at = ?
+          WHERE id = ?
+            AND owner_id = ?
+            AND deleted_at IS NOT NULL
+            AND purged_at IS NULL
+        `).bind(updatedAt, id, ownerId).run()
+      } catch (error) {
+        if (isActiveNameConflict(error)) throw new FileRepositoryConflictError()
+        throw error
+      }
+      if (result.meta.changes === 0) return null
+      if (result.meta.changes !== 1) throw new Error('unexpected_file_restore_count')
+
+      const restored = await db.prepare(`
+        SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
+               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status
+        FROM files
+        WHERE id = ? AND owner_id = ?
+        LIMIT 1
+      `).bind(id, ownerId).first<FileRecord>()
+      if (!restored || restored.deleted_at !== null || restored.storage_status !== 'ready') {
+        throw new Error('restored_file_not_found')
+      }
+      return restored
+    },
+
+    async markFilePurged(ownerId, id, purgedAt) {
+      await db.prepare(`
+        UPDATE files
+        SET purged_at = ?
+        WHERE id = ?
+          AND owner_id = ?
+          AND kind = 'file'
+          AND purged_at IS NULL
+      `).bind(purgedAt, id, ownerId).run()
+    },
+
+    async listTrashObjectKeys(ownerId, cutoff, limit) {
+      return db.prepare(`
+        SELECT id, object_key
+        FROM files
+        WHERE owner_id = ?
+          AND kind = 'file'
+          AND deleted_at IS NOT NULL
+          AND purged_at IS NULL
+          AND deleted_at > ?
+          AND object_key IS NOT NULL
+        ORDER BY deleted_at ASC
+        LIMIT ?
+      `).bind(ownerId, cutoff, limit).all<{ id: string, object_key: string }>().then((result) => result.results)
+    },
+
+    async countTrash(ownerId, cutoff) {
+      const row = await db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM files
+        WHERE owner_id = ?
+          AND kind = 'file'
+          AND deleted_at IS NOT NULL
+          AND purged_at IS NULL
+          AND deleted_at > ?
+      `).bind(ownerId, cutoff).first<{ count: number }>()
+      return row?.count ?? 0
     },
 
     async findUserFolder(userId) {

@@ -250,6 +250,7 @@ test('accepts only the documented storage transition matrix', () => {
     'failed->pending',
     'failed->deleting',
     'deleting->failed',
+    'deleting->ready',
   ])
   const statuses = ['pending', 'ready', 'failed', 'deleting'] as const
   for (const from of statuses) {
