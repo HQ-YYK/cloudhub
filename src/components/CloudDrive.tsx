@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from 'react'
 import {
   createDirectory,
   deleteFile,
@@ -39,6 +39,16 @@ function EmptyIcon() {
       <path d="M3.5 8.25h17l-1.25 10.5H4.75L3.5 8.25Z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
       <path d="M8 8.25V6.5a4 4 0 0 1 8 0v1.75" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
       <path d="M3.75 13.25h5l1.25 1.5h4l1.25-1.5h5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function UploadIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" fill="none" aria-hidden="true">
+      <path d="M8 10.5V3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4.5 6.25 8 2.75l3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M2.75 10.5v1.25A1.5 1.5 0 0 0 4.25 13.25h7.5a1.5 1.5 0 0 0 1.5-1.5V10.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
   )
 }
@@ -87,7 +97,7 @@ function formatUpdatedAt(value: string) {
 
 function displayItemName(name: string, kind: 'file' | 'directory') {
   const normalized = name.normalize('NFC').trim()
-  const hasReplacementText = normalized.includes('\uFFFD')
+  const hasReplacementText = normalized.includes('�')
   const hasControlCharacter = [...normalized].some((character) => {
     const code = character.codePointAt(0) ?? 0
     return code <= 0x1f || code === 0x7f
@@ -107,6 +117,8 @@ export default function CloudDrive() {
   const [folderName, setFolderName] = useState('')
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
+  const [folderFormOpen, setFolderFormOpen] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [actionError, setActionError] = useState('')
@@ -114,10 +126,24 @@ export default function CloudDrive() {
   const uploadQueueRef = useRef<UploadQueueHandle>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const currentIdRef = useRef(current.id)
+  const dragDepthRef = useRef(0)
 
   useEffect(() => {
     currentIdRef.current = current.id
   }, [current.id])
+
+  useEffect(() => {
+    if (!folderFormOpen || creating) return
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setFolderFormOpen(false)
+        setFolderName('')
+        setCreateError('')
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [folderFormOpen, creating])
 
   const loadDirectory = useCallback(async (parentId: string | null, mode: 'initial' | 'refresh' = 'initial') => {
     if (mode === 'initial') setLoading(true)
@@ -158,9 +184,48 @@ export default function CloudDrive() {
     setLevels((previous) => previous.slice(0, index + 1))
   }
 
+  function openFolderForm() {
+    setFolderFormOpen(true)
+    setCreateError('')
+  }
+
+  function closeFolderForm() {
+    setFolderFormOpen(false)
+    setFolderName('')
+    setCreateError('')
+  }
+
   function handleFileSelect(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? [])
     event.target.value = ''
+    if (files.length > 0) uploadQueueRef.current?.enqueue(files, current.id)
+  }
+
+  function handleDragEnter(event: DragEvent<HTMLDivElement>) {
+    if (!Array.from(event.dataTransfer.types).includes('Files')) return
+    event.preventDefault()
+    dragDepthRef.current += 1
+    setDragOver(true)
+  }
+
+  function handleDragLeave(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault()
+    dragDepthRef.current -= 1
+    if (dragDepthRef.current <= 0) {
+      dragDepthRef.current = 0
+      setDragOver(false)
+    }
+  }
+
+  function handleDragOver(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault()
+  }
+
+  function handleDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault()
+    dragDepthRef.current = 0
+    setDragOver(false)
+    const files = Array.from(event.dataTransfer.files)
     if (files.length > 0) uploadQueueRef.current?.enqueue(files, current.id)
   }
 
@@ -177,6 +242,7 @@ export default function CloudDrive() {
     try {
       await createDirectory(name, current.id)
       setFolderName('')
+      setFolderFormOpen(false)
       await loadDirectory(current.id, 'refresh')
     } catch (error) {
       setCreateError(requestErrorMessage(error, 'create'))
@@ -229,33 +295,41 @@ export default function CloudDrive() {
           </nav>
         </div>
         <div className="drive-actions">
+          <button className="primary-small-button upload-file-button" type="button" onClick={() => fileInputRef.current?.click()}>
+            <UploadIcon />
+            <span>上传文件</span>
+          </button>
+          <input ref={fileInputRef} type="file" multiple className="visually-hidden" onChange={handleFileSelect} />
+          <button className="secondary-small-button" type="button" onClick={openFolderForm}>新建文件夹</button>
           <button className="secondary-small-button" type="button" onClick={() => void loadDirectory(current.id, 'refresh')} disabled={loading || refreshing}>
             {refreshing ? '刷新中…' : '刷新'}
           </button>
-          <button className="secondary-small-button" type="button" onClick={() => fileInputRef.current?.click()}>上传文件</button>
-          <input ref={fileInputRef} type="file" multiple className="visually-hidden" onChange={handleFileSelect} />
-          <form className="new-folder-form" onSubmit={handleCreateDirectory}>
-            <label htmlFor="new-folder-name">新建文件夹</label>
-            <div className="new-folder-controls">
-              <input
-                id="new-folder-name"
-                value={folderName}
-                onChange={(event) => {
-                  setFolderName(event.target.value)
-                  if (createError) setCreateError('')
-                }}
-                placeholder="文件夹名称"
-                disabled={creating}
-                maxLength={255}
-              />
-              <button className="primary-small-button" type="submit" disabled={creating}>
-                {creating ? '创建中…' : '创建'}
-              </button>
-            </div>
-            {createError && <p className="drive-form-error" role="alert">{createError}</p>}
-          </form>
         </div>
       </div>
+      {folderFormOpen && (
+        <form className="new-folder-form" onSubmit={handleCreateDirectory}>
+          <div className="new-folder-controls">
+            <input
+              id="new-folder-name"
+              value={folderName}
+              onChange={(event) => {
+                setFolderName(event.target.value)
+                if (createError) setCreateError('')
+              }}
+              placeholder="文件夹名称"
+              aria-label="文件夹名称"
+              disabled={creating}
+              maxLength={255}
+              autoFocus
+            />
+            <button className="primary-small-button" type="submit" disabled={creating}>
+              {creating ? '创建中…' : '创建'}
+            </button>
+            <button className="secondary-small-button" type="button" onClick={closeFolderForm} disabled={creating}>取消</button>
+          </div>
+          {createError && <p className="drive-form-error" role="alert">{createError}</p>}
+        </form>
+      )}
       {actionError && <div className="drive-alert" role="alert"><span>{actionError}</span><button type="button" onClick={() => setActionError('')}>关闭</button></div>}
       {loadError && (
         <div className="drive-alert" role="alert">
@@ -264,14 +338,25 @@ export default function CloudDrive() {
         </div>
       )}
       <UploadQueue ref={uploadQueueRef} onItemDone={handleUploadDone} />
-      <div className="drive-list-panel">
+      <div
+        className="drive-list-panel"
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+      >
+        {dragOver && (
+          <div className="drive-drop-overlay" aria-hidden="true">
+            松开即可上传到「{current.name}」
+          </div>
+        )}
         {loading ? (
           <p className="drive-state" aria-live="polite">正在加载目录…</p>
         ) : items.length === 0 ? (
           <div className="drive-state">
             <span className="drive-state-icon" aria-hidden="true"><EmptyIcon /></span>
             <h3>这里还没有文件</h3>
-            <p>创建文件夹，开始整理你的云端工作资料。</p>
+            <p>拖拽文件到这里，或点击上传文件</p>
           </div>
         ) : (
           <div className="drive-grid">

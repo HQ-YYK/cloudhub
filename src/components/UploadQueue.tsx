@@ -18,6 +18,10 @@ type UploadQueueItem = {
   error: string
 }
 
+type SpeedSample = { time: number; receivedBytes: number }
+
+const SPEED_WINDOW_MS = 5000
+
 function uploadErrorMessage(error: unknown): string {
   if (error instanceof FilesRequestError) {
     if (error.code === 'conflict') return '当前目录已有同名文件'
@@ -42,6 +46,35 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
 }
 
+function formatSpeed(bytesPerSecond: number): string {
+  return `${formatBytes(bytesPerSecond)}/s`
+}
+
+function formatRemaining(seconds: number): string {
+  const total = Math.max(1, Math.round(seconds))
+  if (total < 60) return `${total} 秒`
+  if (total < 3600) {
+    const minutes = Math.floor(total / 60)
+    const secs = total % 60
+    return `${minutes} 分 ${secs} 秒`
+  }
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  return `${hours} 小时 ${minutes} 分`
+}
+
+// Speed over the last SPEED_WINDOW_MS, using the first and last samples in the window.
+function computeSpeed(samples: SpeedSample[]): number | null {
+  if (samples.length < 2) return null
+  const first = samples[0]
+  const last = samples[samples.length - 1]
+  const elapsedMs = last.time - first.time
+  if (elapsedMs < 1000) return null
+  const bytes = last.receivedBytes - first.receivedBytes
+  if (bytes <= 0) return null
+  return (bytes / elapsedMs) * 1000
+}
+
 function makeItem(key: string, file: File, parentId: string | null, status: UploadStatus, error = ''): UploadQueueItem {
   return { key, file, parentId, status, receivedBytes: 0, totalBytes: file.size, error }
 }
@@ -52,12 +85,18 @@ function validateFile(file: File): string {
   return ''
 }
 
-function statusLabel(item: UploadQueueItem): string {
-  if (item.status === 'waiting') return '等待中'
-  if (item.status === 'uploading') return '上传中'
+function statusLabel(item: UploadQueueItem, samples: SpeedSample[]): string {
+  if (item.status === 'uploading') {
+    const percent = item.totalBytes > 0 ? Math.min(100, Math.round((item.receivedBytes / item.totalBytes) * 100)) : 0
+    const speed = computeSpeed(samples)
+    if (speed === null) return `${percent}% · 计算中`
+    const remainingSeconds = (item.totalBytes - item.receivedBytes) / speed
+    return `${percent}% · ${formatSpeed(speed)} · 剩余约 ${formatRemaining(remainingSeconds)}`
+  }
   if (item.status === 'done') return '已完成'
   if (item.status === 'cancelled') return '已取消'
-  return item.error
+  if (item.status === 'failed') return item.error
+  return '等待中'
 }
 
 function canCancel(item: UploadQueueItem): boolean {
@@ -75,9 +114,11 @@ function canRemove(item: UploadQueueItem): boolean {
 export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId: string | null) => void }>(
   function UploadQueue({ onItemDone }, ref) {
     const [items, setItems] = useState<UploadQueueItem[]>([])
+    const [collapsed, setCollapsed] = useState(false)
     const itemsRef = useRef(items)
     const onItemDoneRef = useRef(onItemDone)
     const busyRef = useRef(false)
+    const samplesRef = useRef(new Map<string, SpeedSample[]>())
 
     // Declared before the queue effect so refs are current when the queue runs.
     useEffect(() => {
@@ -89,6 +130,18 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
 
     const patchItem = useCallback((key: string, patch: Partial<UploadQueueItem>) => {
       setItems((previous) => previous.map((item) => (item.key === key ? { ...item, ...patch } : item)))
+    }, [])
+
+    const recordSample = useCallback((key: string, receivedBytes: number) => {
+      const now = Date.now()
+      const list = samplesRef.current.get(key) ?? []
+      list.push({ time: now, receivedBytes })
+      while (list.length > 0 && now - list[0].time > SPEED_WINDOW_MS) list.shift()
+      samplesRef.current.set(key, list)
+    }, [])
+
+    const dropSamples = useCallback((key: string) => {
+      samplesRef.current.delete(key)
     }, [])
 
     const processQueue = useCallback(async () => {
@@ -103,12 +156,17 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
           patchItem(next.key, { status: 'uploading', error: '' })
           try {
             await uploadFile(next.file, next.parentId, {
-              onProgress: (receivedBytes, totalBytes) => patchItem(next.key, { receivedBytes, totalBytes }),
+              onProgress: (receivedBytes, totalBytes) => {
+                recordSample(next.key, receivedBytes)
+                patchItem(next.key, { receivedBytes, totalBytes })
+              },
               signal: controller.signal,
             })
             patchItem(next.key, { status: 'done', receivedBytes: next.file.size, totalBytes: next.file.size })
+            dropSamples(next.key)
             onItemDoneRef.current(next.parentId)
           } catch (error) {
+            dropSamples(next.key)
             if (error instanceof UploadsRequestError && error.code === 'aborted') {
               patchItem(next.key, { status: 'cancelled' })
             } else {
@@ -121,7 +179,7 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
       } finally {
         busyRef.current = false
       }
-    }, [patchItem])
+    }, [patchItem, recordSample, dropSamples])
 
     useEffect(() => {
       void processQueue()
@@ -148,20 +206,26 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
     }, [patchItem])
 
     const retry = useCallback((key: string) => {
+      dropSamples(key)
       patchItem(key, { status: 'waiting', receivedBytes: 0, error: '' })
-    }, [patchItem])
+    }, [patchItem, dropSamples])
 
     const remove = useCallback((key: string) => {
+      dropSamples(key)
       setItems((previous) => previous.filter((item) => item.key !== key))
-    }, [])
+    }, [dropSamples])
 
     const clearCompleted = useCallback(() => {
+      for (const item of itemsRef.current) {
+        if (item.status === 'done') dropSamples(item.key)
+      }
       setItems((previous) => previous.filter((item) => item.status !== 'done'))
-    }, [])
+    }, [dropSamples])
 
     const close = useCallback(() => {
       for (const controller of controllersRef.current.values()) controller.abort()
       controllersRef.current.clear()
+      samplesRef.current.clear()
       setItems([])
     }, [])
 
@@ -169,6 +233,11 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
 
     const hasInProgress = items.some((item) => item.status === 'waiting' || item.status === 'uploading')
     const hasCompleted = items.some((item) => item.status === 'done')
+    const doneCount = items.filter((item) => item.status === 'done').length
+    const activeItems = items.filter((item) => item.status !== 'failed' && item.status !== 'cancelled')
+    const totalReceived = activeItems.reduce((sum, item) => sum + item.receivedBytes, 0)
+    const totalBytes = activeItems.reduce((sum, item) => sum + item.totalBytes, 0)
+    const totalPercent = totalBytes > 0 ? Math.min(100, Math.round((totalReceived / totalBytes) * 100)) : 0
 
     useEffect(() => {
       if (!hasInProgress) return
@@ -185,41 +254,67 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
     return (
       <div className="upload-queue" aria-label="上传队列">
         <div className="upload-queue-header">
-          <h3>上传队列</h3>
+          <div className="upload-queue-title">
+            <h3>上传队列</h3>
+            <span className="upload-queue-count">已完成 {doneCount} / 共 {items.length}</span>
+            {hasInProgress && <span className="upload-queue-total-percent">{totalPercent}%</span>}
+          </div>
           <div className="upload-queue-header-actions">
             {hasCompleted && <button type="button" onClick={clearCompleted}>清除已完成</button>}
+            <button type="button" onClick={() => setCollapsed((value) => !value)} aria-expanded={!collapsed}>
+              {collapsed ? '展开' : '收起'}
+            </button>
             <button type="button" onClick={close}>关闭</button>
           </div>
         </div>
-        <ul className="upload-queue-list">
-          {items.map((item) => {
-            const percent = item.totalBytes > 0 ? Math.min(100, Math.round((item.receivedBytes / item.totalBytes) * 100)) : 0
-            return (
-              <li className="upload-queue-item" key={item.key}>
-                <div className="upload-queue-row">
-                  <span className="upload-queue-name" title={item.file.name}>{item.file.name}</span>
-                  <span className="upload-queue-size">{formatBytes(item.receivedBytes)} / {formatBytes(item.totalBytes)}</span>
-                  <span className={`upload-queue-status is-${item.status}`}>{statusLabel(item)}</span>
-                  <span className="upload-queue-controls">
-                    {canCancel(item) && <button type="button" onClick={() => cancel(item.key)}>取消</button>}
-                    {canRetry(item) && <button type="button" onClick={() => retry(item.key)}>重试</button>}
-                    {canRemove(item) && <button type="button" onClick={() => remove(item.key)}>移除</button>}
-                  </span>
-                </div>
-                <div
-                  className="upload-progress"
-                  role="progressbar"
-                  aria-valuemin={0}
-                  aria-valuemax={item.totalBytes}
-                  aria-valuenow={item.receivedBytes}
-                  aria-label={`${item.file.name} 上传进度`}
-                >
-                  <span className="upload-progress-fill" style={{ width: `${percent}%` }} />
-                </div>
-              </li>
-            )
-          })}
-        </ul>
+        {collapsed ? (
+          <div
+            className="upload-progress"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={totalBytes}
+            aria-valuenow={totalReceived}
+            aria-label="上传总进度"
+          >
+            <span className="upload-progress-fill" style={{ width: `${totalPercent}%` }} />
+          </div>
+        ) : (
+          <ul className="upload-queue-list">
+            {items.map((item) => {
+              const percent = item.totalBytes > 0 ? Math.min(100, Math.round((item.receivedBytes / item.totalBytes) * 100)) : 0
+              const samples = samplesRef.current.get(item.key) ?? []
+              const fillClass = item.status === 'done'
+                ? 'upload-progress-fill is-done'
+                : item.status === 'failed'
+                  ? 'upload-progress-fill is-failed'
+                  : 'upload-progress-fill'
+              return (
+                <li className="upload-queue-item" key={item.key}>
+                  <div className="upload-queue-row">
+                    <span className="upload-queue-name" title={item.file.name}>{item.file.name}</span>
+                    <span className="upload-queue-size">{formatBytes(item.receivedBytes)} / {formatBytes(item.totalBytes)}</span>
+                    <span className={`upload-queue-status is-${item.status}`}>{statusLabel(item, samples)}</span>
+                    <span className="upload-queue-controls">
+                      {canCancel(item) && <button type="button" onClick={() => cancel(item.key)}>取消</button>}
+                      {canRetry(item) && <button type="button" onClick={() => retry(item.key)}>重试</button>}
+                      {canRemove(item) && <button type="button" onClick={() => remove(item.key)}>移除</button>}
+                    </span>
+                  </div>
+                  <div
+                    className="upload-progress"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={item.totalBytes}
+                    aria-valuenow={item.receivedBytes}
+                    aria-label={`${item.file.name} 上传进度`}
+                  >
+                    <span className={fillClass} style={{ width: `${percent}%` }} />
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        )}
       </div>
     )
   },
