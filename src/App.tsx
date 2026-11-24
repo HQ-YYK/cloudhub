@@ -3,6 +3,7 @@ import { useAuth } from './auth/useAuth'
 import LoginPage from './components/LoginPage'
 import Workspace from './components/Workspace'
 import ChangePassword from './components/ChangePassword'
+import PublicShare from './components/PublicShare'
 import './App.css'
 
 function AppContent() {
@@ -19,6 +20,9 @@ function AppContent() {
 }
 
 function App() {
+  if (window.location.pathname.startsWith('/s/')) {
+    return <PublicShare token={window.location.pathname.slice(3).split('/')[0]} />
+  }
   return (
     <AuthProvider>
       <AppContent />

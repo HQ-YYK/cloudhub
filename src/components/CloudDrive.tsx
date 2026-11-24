@@ -11,6 +11,7 @@ import {
 import { EmptyIcon, FileIcon, FolderIcon, MoreIcon, UploadIcon } from './DriveIcons'
 import MoveDialog from './MoveDialog'
 import RenameInput from './RenameInput'
+import ShareDialog from './ShareDialog'
 import { UploadQueue, type UploadQueueHandle } from './UploadQueue'
 
 type DirectoryLevel = {
@@ -105,13 +106,14 @@ export default function CloudDrive() {
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameSaving, setRenameSaving] = useState(false)
   const [moveTarget, setMoveTarget] = useState<DriveItem | null>(null)
+  const [shareTarget, setShareTarget] = useState<DriveItem | null>(null)
   const [folderMenuId, setFolderMenuId] = useState<string | null>(null)
   const current = levels[levels.length - 1]
   const uploadQueueRef = useRef<UploadQueueHandle>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const currentIdRef = useRef(current.id)
   const dragDepthRef = useRef(0)
-  const cardBusy = downloadingId !== null || deletingId !== null || renamingId !== null || moveTarget !== null
+  const cardBusy = downloadingId !== null || deletingId !== null || renamingId !== null || moveTarget !== null || shareTarget !== null
 
   useEffect(() => {
     currentIdRef.current = current.id
@@ -311,6 +313,11 @@ export default function CloudDrive() {
     setActionError('')
   }
 
+  function startShare(item: DriveItem) {
+    setShareTarget(item)
+    setActionError('')
+  }
+
   function handleMoveDone() {
     setMoveTarget(null)
     void loadDirectory(current.id, 'refresh')
@@ -446,6 +453,7 @@ export default function CloudDrive() {
                     </button>
                     <button type="button" onClick={() => startRename(item)} disabled={cardBusy}>改名</button>
                     <button type="button" onClick={() => startMove(item)} disabled={cardBusy}>移动</button>
+                    <button type="button" onClick={() => startShare(item)} disabled={cardBusy}>分享</button>
                     <button type="button" className="danger-text-button" onClick={() => void handleDelete(item)} disabled={cardBusy}>
                       {deletingId === item.id ? '删除中…' : '删除'}
                     </button>
@@ -456,6 +464,9 @@ export default function CloudDrive() {
           </div>
         )}
       </div>
+      {shareTarget && (
+        <ShareDialog item={shareTarget} onClose={() => setShareTarget(null)} />
+      )}
       {moveTarget && (
         <MoveDialog
           item={moveTarget}
