@@ -1,7 +1,7 @@
 import { getAuthenticatedUser } from './auth.ts'
 import type { AuthRepository } from './auth-repository.ts'
 import { BlobStoreError, type BlobStore } from './blob-store.ts'
-import { allowsInlineContentType, contentDisposition, jsonResponse } from './http.ts'
+import { allowsInlineContentType, contentDisposition, INLINE_CONTENT_SECURITY_POLICY, normalizeMimeType, jsonResponse } from './http.ts'
 import { contentRange, parseByteRange, unsatisfiedContentRange } from './range.ts'
 import { decryptSecret, encryptSecret } from './secret-box.ts'
 import type {
@@ -291,9 +291,10 @@ export async function streamPublicShare(
     await shareRepository.incrementDownloadCount(record.id)
   }
 
-  const contentType = blob.contentType ?? record.file_mime_type ?? 'application/octet-stream'
+  const contentType = normalizeMimeType(blob.contentType ?? record.file_mime_type) ?? 'application/octet-stream'
   const inline = new URL(request.url).searchParams.get('inline') === '1'
-  const disposition = inline && allowsInlineContentType(contentType)
+  const renderInline = inline && allowsInlineContentType(contentType)
+  const disposition = renderInline
     ? contentDisposition(record.file_name, 'inline')
     : contentDisposition(record.file_name)
 
@@ -304,6 +305,7 @@ export async function streamPublicShare(
     'X-Content-Type-Options': 'nosniff',
     'Accept-Ranges': 'bytes',
   })
+  if (renderInline) headers.set('Content-Security-Policy', INLINE_CONTENT_SECURITY_POLICY)
   if (blob.range) {
     headers.set('Content-Range', contentRange(blob.range.start, blob.range.end, blob.range.total))
     headers.set('Content-Length', String(blob.sizeBytes))

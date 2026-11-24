@@ -528,6 +528,7 @@ test('inline downloads whitelist media types but keep other types as attachments
     imageToken,
   )
   assert.match(image.headers.get('Content-Disposition') ?? '', /^inline; filename=/u)
+  assert.match(image.headers.get('Content-Security-Policy') ?? '', /sandbox/u)
 
   const html = await streamPublicShare(
     repository,

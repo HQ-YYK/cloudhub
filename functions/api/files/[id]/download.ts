@@ -7,7 +7,7 @@ import { createD1AuthRepository } from '../../../_lib/d1-auth-repository.ts'
 import { createD1FileRepository } from '../../../_lib/d1-file-repository.ts'
 import type { FileRepository } from '../../../_lib/file-repository.ts'
 import { FileServiceError, validateFileId } from '../../../_lib/file-service.ts'
-import { allowsInlineContentType, contentDisposition, jsonResponse, methodNotAllowed } from '../../../_lib/http.ts'
+import { allowsInlineContentType, contentDisposition, INLINE_CONTENT_SECURITY_POLICY, normalizeMimeType, jsonResponse, methodNotAllowed } from '../../../_lib/http.ts'
 import { createProductionBlobStore } from '../../../_lib/production-blob-store.ts'
 import { contentRange, parseByteRange, unsatisfiedContentRange } from '../../../_lib/range.ts'
 
@@ -97,9 +97,10 @@ export function createDownloadHandler(
         return unavailableResponse()
       }
 
-      const contentType = blob.contentType ?? record.mime_type ?? 'application/octet-stream'
+      const contentType = normalizeMimeType(blob.contentType ?? record.mime_type) ?? 'application/octet-stream'
       const inline = new URL(context.request.url).searchParams.get('inline') === '1'
-      const disposition = inline && allowsInlineContentType(contentType)
+      const renderInline = inline && allowsInlineContentType(contentType)
+      const disposition = renderInline
         ? contentDisposition(record.name, 'inline')
         : contentDisposition(record.name)
 
@@ -110,6 +111,7 @@ export function createDownloadHandler(
         'X-Content-Type-Options': 'nosniff',
         'Accept-Ranges': 'bytes',
       })
+      if (renderInline) headers.set('Content-Security-Policy', INLINE_CONTENT_SECURITY_POLICY)
       if (blob.range) {
         headers.set('Content-Range', contentRange(blob.range.start, blob.range.end, blob.range.total))
         headers.set('Content-Length', String(blob.sizeBytes))

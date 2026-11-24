@@ -45,11 +45,17 @@ test('contentRange helpers build the range response headers', () => {
   assert.equal(unsatisfiedContentRange(200), 'bytes */200')
 })
 
-test('inline content types exclude svg and ignore case and parameters', async () => {
-  const { allowsInlineContentType } = await import('./http.ts')
+test('inline content types use an exact allowlist and normalized types', async () => {
+  const { allowsInlineContentType, normalizeMimeType } = await import('./http.ts')
   assert.equal(allowsInlineContentType('image/svg+xml'), false)
   assert.equal(allowsInlineContentType('IMAGE/SVG+XML'), false)
   assert.equal(allowsInlineContentType('text/html'), false)
+  assert.equal(allowsInlineContentType('image/x-icon'), false)
+  assert.equal(allowsInlineContentType('image/png, text/html'), false)
+  assert.equal(allowsInlineContentType(null), false)
   assert.equal(allowsInlineContentType('Image/PNG'), true)
   assert.equal(allowsInlineContentType('text/plain; charset=utf-8'), true)
+  assert.equal(normalizeMimeType('Video/MP4; codecs=avc1'), 'video/mp4')
+  assert.equal(normalizeMimeType('text/html\r\nX-Evil: 1'), null)
+  assert.equal(normalizeMimeType('not a type'), null)
 })

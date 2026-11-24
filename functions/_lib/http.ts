@@ -28,15 +28,36 @@ export function contentDisposition(fileName: string, type: 'attachment' | 'inlin
   return `${type}; filename="${fallback}"; filename*=UTF-8''${encoded}`
 }
 
-// SVG can carry scripts, so it is never rendered inline on this origin.
-export function allowsInlineContentType(contentType: string) {
+// Exact list of types safe to render inline on this origin. SVG, HTML and XML are excluded.
+const INLINE_CONTENT_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/avif',
+  'video/mp4',
+  'video/webm',
+  'video/quicktime',
+  'audio/mpeg',
+  'audio/mp4',
+  'audio/ogg',
+  'audio/wav',
+  'audio/webm',
+  'application/pdf',
+  'text/plain',
+])
+
+export const INLINE_CONTENT_SECURITY_POLICY = "sandbox; default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'"
+
+export function normalizeMimeType(contentType: string | null | undefined): string | null {
+  if (!contentType || /[,\r\n]/u.test(contentType)) return null
   const type = contentType.split(';')[0].trim().toLowerCase()
-  if (type === 'image/svg+xml') return false
-  return type.startsWith('image/')
-    || type.startsWith('video/')
-    || type.startsWith('audio/')
-    || type === 'application/pdf'
-    || type === 'text/plain'
+  return /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/u.test(type) ? type : null
+}
+
+export function allowsInlineContentType(contentType: string | null | undefined) {
+  const type = normalizeMimeType(contentType)
+  return type !== null && INLINE_CONTENT_TYPES.has(type)
 }
 
 export function sameOriginRequest(request: Request) {
