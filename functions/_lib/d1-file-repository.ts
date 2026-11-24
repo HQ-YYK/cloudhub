@@ -3,6 +3,7 @@ import {
   FileRepositoryConflictError,
   type FileRecord,
   type FileRepository,
+  type MoveRepository,
   type NewDirectory,
   type NewPendingFile,
   type TrashItem,
@@ -16,7 +17,7 @@ function isActiveNameConflict(error: unknown) {
   return /unique constraint failed: index ['"]?idx_files_active_name['"]?/iu.test(message)
 }
 
-export function createD1FileRepository(db: D1Database): FileRepository & UploadRepository & TrashRepository {
+export function createD1FileRepository(db: D1Database): FileRepository & UploadRepository & TrashRepository & MoveRepository {
   return {
     async listChildren(ownerId, parentId) {
       return db.prepare(`
@@ -182,6 +183,71 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
       `).bind(id, ownerId).first<FileRecord>()
       if (!deleted || deleted.deleted_at !== deletedAt) throw new Error('deleted_file_not_found')
       return deleted
+    },
+
+    async findItem(ownerId, id) {
+      return db.prepare(`
+        SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
+               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status,
+               drive_folder_id, md5
+        FROM files
+        WHERE id = ?
+          AND owner_id = ?
+          AND deleted_at IS NULL
+        LIMIT 1
+      `).bind(id, ownerId).first<FileRecord>()
+    },
+
+    async isDescendantOrSelf(ownerId, ancestorId, candidateId) {
+      const row = await db.prepare(`
+        WITH RECURSIVE ancestors(id, parent_id) AS (
+          SELECT id, parent_id
+          FROM files
+          WHERE id = ?
+            AND owner_id = ?
+            AND deleted_at IS NULL
+          UNION ALL
+          SELECT files.id, files.parent_id
+          FROM files
+          JOIN ancestors ON files.id = ancestors.parent_id
+          WHERE files.owner_id = ?
+            AND files.deleted_at IS NULL
+        )
+        SELECT 1 AS one
+        FROM ancestors
+        WHERE id = ?
+        LIMIT 1
+      `).bind(candidateId, ownerId, ownerId, ancestorId).first<{ one: number }>()
+      return row !== null
+    },
+
+    async updateNameAndParent(ownerId, id, name, nameKey, parentId, updatedAt) {
+      let result
+      try {
+        result = await db.prepare(`
+          UPDATE files
+          SET name = ?, name_key = ?, parent_id = ?, updated_at = ?
+          WHERE id = ?
+            AND owner_id = ?
+            AND deleted_at IS NULL
+        `).bind(name, nameKey, parentId, updatedAt, id, ownerId).run()
+      } catch (error) {
+        if (isActiveNameConflict(error)) throw new FileRepositoryConflictError()
+        throw error
+      }
+      if (result.meta.changes === 0) return null
+      if (result.meta.changes !== 1) throw new Error('unexpected_file_move_update_count')
+
+      const updated = await db.prepare(`
+        SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
+               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status,
+               drive_folder_id, md5
+        FROM files
+        WHERE id = ? AND owner_id = ?
+        LIMIT 1
+      `).bind(id, ownerId).first<FileRecord>()
+      if (!updated || updated.deleted_at !== null) throw new Error('updated_file_not_found')
+      return updated
     },
 
     async listTrash(ownerId, cutoff) {

@@ -94,4 +94,31 @@ export class GoogleDriveClient {
     if (response.status === 404) throw new BlobStoreError('not_found', 'drive_object_not_found')
     if (!response.ok) throw new BlobStoreError('unavailable', 'google_drive_delete_failed')
   }
+
+  async updateFile(
+    id: string,
+    patch: { name?: string; addParents?: string; removeParents?: string },
+  ): Promise<void> {
+    const params = new URLSearchParams()
+    if (patch.addParents !== undefined) params.set('addParents', patch.addParents)
+    if (patch.removeParents !== undefined) params.set('removeParents', patch.removeParents)
+    const query = params.toString()
+    const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}${query ? `?${query}` : ''}`
+    const hasName = patch.name !== undefined
+    const response = await this.authorizedFetch(url, {
+      method: 'PATCH',
+      headers: hasName ? { 'Content-Type': 'application/json' } : undefined,
+      body: hasName ? JSON.stringify({ name: patch.name }) : undefined,
+    })
+    if (!response.ok) throw new BlobStoreError('unavailable', 'google_drive_update_failed')
+  }
+
+  async getParents(id: string): Promise<string[]> {
+    const response = await this.authorizedFetch(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?fields=parents`,
+    )
+    if (!response.ok) throw new BlobStoreError('unavailable', 'google_drive_get_parents_failed')
+    const payload = await response.json() as { parents?: string[] }
+    return payload.parents ?? []
+  }
 }

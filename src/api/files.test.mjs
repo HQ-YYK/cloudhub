@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { deleteFile, downloadFile } from './files.ts'
+import { deleteFile, downloadFile, moveItem, renameItem } from './files.ts'
 
 function mockFetch(response, capture) {
   const original = globalThis.fetch
@@ -64,6 +64,47 @@ test('delete uses DELETE and the encoded file ID', async () => {
     assert.equal(request.input, '/api/files/file%2Fid')
     assert.equal(request.init.method, 'DELETE')
     assert.equal(request.init.credentials, 'same-origin')
+  } finally {
+    restore()
+  }
+})
+
+test('rename uses PATCH and the encoded file ID', async () => {
+  let request
+  const restore = mockFetch(
+    new Response(JSON.stringify({ item: { id: 'file/id', name: 'new.txt' } }), {
+      headers: { 'Content-Type': 'application/json' },
+    }),
+    (input, init) => {
+      request = { input, init }
+    },
+  )
+  try {
+    await renameItem('file/id', 'new.txt')
+    assert.equal(request.input, '/api/files/file%2Fid')
+    assert.equal(request.init.method, 'PATCH')
+    assert.equal(request.init.credentials, 'same-origin')
+    assert.deepEqual(JSON.parse(request.init.body), { name: 'new.txt' })
+  } finally {
+    restore()
+  }
+})
+
+test('move uses PATCH and sends the target parentId', async () => {
+  let request
+  const restore = mockFetch(
+    new Response(JSON.stringify({ item: { id: 'file/id' } }), {
+      headers: { 'Content-Type': 'application/json' },
+    }),
+    (input, init) => {
+      request = { input, init }
+    },
+  )
+  try {
+    await moveItem('file/id', 'parent/id')
+    assert.equal(request.input, '/api/files/file%2Fid')
+    assert.equal(request.init.method, 'PATCH')
+    assert.deepEqual(JSON.parse(request.init.body), { parentId: 'parent/id' })
   } finally {
     restore()
   }
