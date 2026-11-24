@@ -211,3 +211,102 @@ test('cancels the session and throws aborted when the signal fires', async () =>
     restore()
   }
 })
+
+function installFakeXhr(respond) {
+  const sent = []
+  class FakeXhr {
+    constructor() {
+      this.upload = {}
+      this.status = 0
+      this.responseText = ''
+    }
+    open(method, path) { this.method = method; this.path = path }
+    setRequestHeader() {}
+    abort() { queueMicrotask(() => this.onabort?.()) }
+    send(body) {
+      sent.push({ path: this.path, size: body.size })
+      queueMicrotask(() => respond(this, body))
+    }
+  }
+  const original = globalThis.XMLHttpRequest
+  globalThis.XMLHttpRequest = FakeXhr
+  return { sent, restore: () => { globalThis.XMLHttpRequest = original } }
+}
+
+function finishXhr(xhr, status, body) {
+  xhr.status = status
+  xhr.responseText = JSON.stringify(body)
+  xhr.onload?.()
+}
+
+test('xhr chunk upload reports progress inside a chunk', async () => {
+  const file = new File([new Uint8Array(200)], 'x.bin')
+  const { restore } = mockFetch((request) => {
+    if (request.init.method === 'POST') return json({ uploadId: 'u1', chunkSize: 100, receivedBytes: 0 }, 201)
+    throw new Error('unexpected fetch')
+  })
+  const xhr = installFakeXhr((instance, body) => {
+    const offset = Number(new URL(instance.path, 'http://cloudhub.test').searchParams.get('offset'))
+    instance.upload.onprogress?.({ loaded: 40 })
+    instance.upload.onprogress?.({ loaded: 999 })
+    const end = offset + body.size
+    finishXhr(instance, 200, end === 200 ? { receivedBytes: 200, done: true, item: driveItem() } : { receivedBytes: end, done: false })
+  })
+  const progress = []
+  try {
+    const result = await uploadFile(file, null, { onProgress: (received) => progress.push(received) })
+    assert.deepEqual(result, driveItem())
+    assert.deepEqual(progress, [40, 100, 100, 140, 200, 200])
+    assert.deepEqual(xhr.sent.map((entry) => entry.size), [100, 100])
+  } finally {
+    xhr.restore()
+    restore()
+  }
+})
+
+test('xhr chunk upload parses offset_mismatch and error codes', async () => {
+  const file = new File([new Uint8Array(200)], 'x.bin')
+  const { calls, restore } = mockFetch((request) => {
+    if (request.init.method === 'POST') return json({ uploadId: 'u1', chunkSize: 100, receivedBytes: 0 }, 201)
+    if (request.init.method === 'DELETE') return json({ ok: true })
+    throw new Error('unexpected fetch')
+  })
+  let count = 0
+  const xhr = installFakeXhr((instance) => {
+    count += 1
+    if (count === 1) finishXhr(instance, 409, { error: 'offset_mismatch', receivedBytes: 100 })
+    else finishXhr(instance, 410, { error: 'upload_expired' })
+  })
+  try {
+    await assert.rejects(
+      uploadFile(file, null, { retryDelays: [1, 1, 1] }),
+      (error) => error instanceof UploadsRequestError && error.status === 410 && error.code === 'upload_expired',
+    )
+    assert.deepEqual(xhr.sent.map((entry) => entry.path), ['/api/uploads/u1/chunk?offset=0', '/api/uploads/u1/chunk?offset=100'])
+    assert.equal(calls.filter((call) => call.init.method === 'DELETE').length, 1)
+  } finally {
+    xhr.restore()
+    restore()
+  }
+})
+
+test('xhr chunk upload aborts the request and cancels the session', async () => {
+  const file = new File([new Uint8Array(200)], 'x.bin')
+  const controller = new AbortController()
+  const { calls, restore } = mockFetch((request) => {
+    if (request.init.method === 'POST') return json({ uploadId: 'u1', chunkSize: 100, receivedBytes: 0 }, 201)
+    if (request.init.method === 'DELETE') return json({ ok: true })
+    throw new Error('unexpected fetch')
+  })
+  const xhr = installFakeXhr(() => controller.abort())
+  try {
+    await assert.rejects(
+      uploadFile(file, null, { signal: controller.signal }),
+      (error) => error instanceof UploadsRequestError && error.code === 'aborted',
+    )
+    assert.equal(calls.filter((call) => call.init.method === 'DELETE').length, 1)
+  } finally {
+    xhr.restore()
+    restore()
+  }
+})

@@ -76,12 +76,68 @@ export async function createUpload(
   return { uploadId: payload.uploadId, chunkSize: payload.chunkSize, receivedBytes: payload.receivedBytes }
 }
 
-export async function uploadChunk(uploadId: string, offset: number, chunk: Blob, signal?: AbortSignal): Promise<ChunkResult> {
-  const payload = await requestUploads(
-    `/api/uploads/${encodeURIComponent(uploadId)}/chunk?offset=${offset}`,
-    { method: 'PUT', body: chunk },
-    signal,
-  )
+function parseErrorPayload(text: string): UploadResponse {
+  try {
+    return JSON.parse(text) as UploadResponse
+  } catch {
+    return {}
+  }
+}
+
+// fetch cannot report request body progress, so browsers use XHR for chunk bodies.
+function sendChunkWithXhr(
+  path: string,
+  chunk: Blob,
+  signal: AbortSignal | undefined,
+  onChunkProgress: ((sentBytes: number) => void) | undefined,
+): Promise<UploadResponse> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new UploadsRequestError(0, 'aborted'))
+      return
+    }
+    const xhr = new XMLHttpRequest()
+    const onAbort = () => xhr.abort()
+    signal?.addEventListener('abort', onAbort, { once: true })
+    const cleanup = () => signal?.removeEventListener('abort', onAbort)
+
+    xhr.open('PUT', path)
+    xhr.withCredentials = true
+    xhr.setRequestHeader('Accept', 'application/json')
+    xhr.upload.onprogress = (event) => onChunkProgress?.(event.loaded)
+    xhr.onload = () => {
+      cleanup()
+      const payload = parseErrorPayload(xhr.responseText)
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(payload)
+        return
+      }
+      const receivedBytes = typeof payload.receivedBytes === 'number' ? payload.receivedBytes : null
+      reject(new UploadsRequestError(xhr.status, payload.error ?? 'request_failed', receivedBytes))
+    }
+    xhr.onerror = () => {
+      cleanup()
+      reject(new UploadsRequestError(0, 'network_error'))
+    }
+    xhr.onabort = () => {
+      cleanup()
+      reject(new UploadsRequestError(0, 'aborted'))
+    }
+    xhr.send(chunk)
+  })
+}
+
+export async function uploadChunk(
+  uploadId: string,
+  offset: number,
+  chunk: Blob,
+  signal?: AbortSignal,
+  onChunkProgress?: (sentBytes: number) => void,
+): Promise<ChunkResult> {
+  const path = `/api/uploads/${encodeURIComponent(uploadId)}/chunk?offset=${offset}`
+  const payload = typeof XMLHttpRequest === 'undefined'
+    ? await requestUploads(path, { method: 'PUT', body: chunk }, signal)
+    : await sendChunkWithXhr(path, chunk, signal, onChunkProgress)
   if (typeof payload.receivedBytes !== 'number' || typeof payload.done !== 'boolean') {
     throw new UploadsRequestError(500, 'invalid_response')
   }
@@ -162,7 +218,9 @@ export async function uploadFile(
 
     let result: ChunkResult
     try {
-      result = await uploadChunk(created.uploadId, offset, chunk, signal)
+      result = await uploadChunk(created.uploadId, offset, chunk, signal, (sentBytes) => {
+        onProgress?.(offset + Math.min(sentBytes, chunk.size), file.size)
+      })
     } catch (error) {
       if (error instanceof UploadsRequestError && error.code === 'aborted') return abortUpload(created.uploadId)
       if (error instanceof UploadsRequestError && error.code === 'offset_mismatch') {

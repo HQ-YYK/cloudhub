@@ -65,7 +65,7 @@ function canCancel(item: UploadQueueItem): boolean {
 }
 
 function canRetry(item: UploadQueueItem): boolean {
-  return item.status === 'failed'
+  return item.status === 'failed' && validateFile(item.file) === ''
 }
 
 function canRemove(item: UploadQueueItem): boolean {
