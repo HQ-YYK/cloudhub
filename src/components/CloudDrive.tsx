@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import {
   createDirectory,
   deleteFile,
@@ -7,6 +7,7 @@ import {
   type DriveItem,
   FilesRequestError,
 } from '../api/files'
+import { UploadQueue, type UploadQueueHandle } from './UploadQueue'
 
 type DirectoryLevel = {
   id: string | null
@@ -110,6 +111,13 @@ export default function CloudDrive() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [actionError, setActionError] = useState('')
   const current = levels[levels.length - 1]
+  const uploadQueueRef = useRef<UploadQueueHandle>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const currentIdRef = useRef(current.id)
+
+  useEffect(() => {
+    currentIdRef.current = current.id
+  }, [current.id])
 
   const loadDirectory = useCallback(async (parentId: string | null, mode: 'initial' | 'refresh' = 'initial') => {
     if (mode === 'initial') setLoading(true)
@@ -125,6 +133,10 @@ export default function CloudDrive() {
       else setRefreshing(false)
     }
   }, [])
+
+  const handleUploadDone = useCallback((parentId: string | null) => {
+    if (parentId === currentIdRef.current) void loadDirectory(currentIdRef.current, 'refresh')
+  }, [loadDirectory])
 
   useEffect(() => {
     let active = true
@@ -144,6 +156,12 @@ export default function CloudDrive() {
 
   function goToLevel(index: number) {
     setLevels((previous) => previous.slice(0, index + 1))
+  }
+
+  function handleFileSelect(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? [])
+    event.target.value = ''
+    if (files.length > 0) uploadQueueRef.current?.enqueue(files, current.id)
   }
 
   async function handleCreateDirectory(event: FormEvent<HTMLFormElement>) {
@@ -214,6 +232,8 @@ export default function CloudDrive() {
           <button className="secondary-small-button" type="button" onClick={() => void loadDirectory(current.id, 'refresh')} disabled={loading || refreshing}>
             {refreshing ? '刷新中…' : '刷新'}
           </button>
+          <button className="secondary-small-button" type="button" onClick={() => fileInputRef.current?.click()}>上传文件</button>
+          <input ref={fileInputRef} type="file" multiple className="visually-hidden" onChange={handleFileSelect} />
           <form className="new-folder-form" onSubmit={handleCreateDirectory}>
             <label htmlFor="new-folder-name">新建文件夹</label>
             <div className="new-folder-controls">
@@ -243,6 +263,7 @@ export default function CloudDrive() {
           <button type="button" onClick={() => void loadDirectory(current.id, 'refresh')}>重试</button>
         </div>
       )}
+      <UploadQueue ref={uploadQueueRef} onItemDone={handleUploadDone} />
       <div className="drive-list-panel">
         {loading ? (
           <p className="drive-state" aria-live="polite">正在加载目录…</p>

@@ -104,6 +104,26 @@
 .drive-file-actions button:disabled { cursor: wait; opacity: .65; }
 .drive-file-actions .danger-text-button { color: #c64f5c; }
 
+.upload-queue { margin-bottom: 16px; padding: 16px 18px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
+.upload-queue-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.upload-queue-header h3 { margin: 0; font-size: 14px; letter-spacing: -.2px; }
+.upload-queue-header-actions { display: flex; gap: 12px; }
+.upload-queue-header-actions button { padding: 0; color: var(--blue); background: transparent; border: 0; font-size: 12px; font-weight: 700; }
+.upload-queue-list { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.upload-queue-item { display: grid; gap: 8px; padding: 12px; background: #fbfcff; border: 1px solid #e1e6f0; border-radius: 8px; }
+.upload-queue-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; }
+.upload-queue-name { flex: 1 1 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 650; }
+.upload-queue-size { color: #8995a9; font-size: 11px; white-space: nowrap; }
+.upload-queue-status { font-size: 11px; font-weight: 650; white-space: nowrap; }
+.upload-queue-status.is-done { color: #3c8a65; }
+.upload-queue-status.is-failed { color: #c64f5c; }
+.upload-queue-status.is-cancelled, .upload-queue-status.is-waiting { color: #9aa5b7; }
+.upload-queue-status.is-uploading { color: var(--blue); }
+.upload-queue-controls { display: flex; gap: 10px; }
+.upload-queue-controls button { padding: 0; color: var(--blue); background: transparent; border: 0; font-size: 11px; font-weight: 700; }
+.upload-progress { height: 6px; overflow: hidden; background: #edf2ff; border-radius: 3px; }
+.upload-progress-fill { display: block; height: 100%; background: var(--blue); border-radius: 3px; transition: width .2s; }
+
 .forced-password-page { min-height: 100vh; display: grid; place-items: center; align-content: center; padding: 24px; background: #f5f7fb; }
 .forced-password-page > .forced-password-page { min-height: auto; padding: 0; }
 .forced-password-page .password-form { max-width: 440px; }
@@ -154,4 +174,5 @@
   .admin-create-form .primary-small-button { width: 100%; }
   .admin-users-toolbar { align-items: center; }
   .admin-table-panel { max-width: calc(100vw - 32px); }
+  .upload-queue-name { flex-basis: 100%; }
 }
