@@ -7,24 +7,14 @@ import { createD1AuthRepository } from '../../../_lib/d1-auth-repository.ts'
 import { createD1FileRepository } from '../../../_lib/d1-file-repository.ts'
 import type { FileRepository } from '../../../_lib/file-repository.ts'
 import { FileServiceError, validateFileId } from '../../../_lib/file-service.ts'
-import { jsonResponse, methodNotAllowed } from '../../../_lib/http.ts'
+import { allowsInlineContentType, contentDisposition, jsonResponse, methodNotAllowed } from '../../../_lib/http.ts'
 import { createProductionBlobStore } from '../../../_lib/production-blob-store.ts'
+import { contentRange, parseByteRange, unsatisfiedContentRange } from '../../../_lib/range.ts'
 
 interface DownloadDependencies {
   createAuthRepository: (env: AuthEnv) => AuthRepository
   createFileRepository: (env: AuthEnv) => FileRepository
   createBlobStore: (env: AuthEnv) => BlobStore
-}
-
-function contentDisposition(fileName: string) {
-  const fallback = fileName
-    .replace(/[^\x20-\x7e]/gu, '_')
-    .replace(/["\\\r\n/;]/gu, '_')
-    .trim()
-    .slice(0, 180) || 'download'
-  const encoded = encodeURIComponent(fileName)
-    .replace(/[!'()*]/gu, (character) => `%${character.codePointAt(0)!.toString(16).toUpperCase()}`)
-  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`
 }
 
 function invalidFileIdResponse() {
@@ -89,17 +79,42 @@ export function createDownloadHandler(
       }
 
       const blobStore = dependencies.createBlobStore(context.env)
-      const blob = await blobStore.get(record.object_key)
+      const rangeResult = parseByteRange(context.request.headers.get('Range'), sizeBytes)
+      if (rangeResult.kind === 'not-satisfiable') {
+        return new Response(null, {
+          status: 416,
+          headers: {
+            'Accept-Ranges': 'bytes',
+            'Content-Range': unsatisfiedContentRange(sizeBytes),
+          },
+        })
+      }
+
+      const blob = rangeResult.kind === 'range'
+        ? await blobStore.get(record.object_key, { start: rangeResult.start, end: rangeResult.end })
+        : await blobStore.get(record.object_key)
       if (!Number.isSafeInteger(blob.sizeBytes) || blob.sizeBytes < 0) {
         return unavailableResponse()
       }
 
+      const contentType = blob.contentType ?? record.mime_type ?? 'application/octet-stream'
+      const inline = new URL(context.request.url).searchParams.get('inline') === '1'
+      const disposition = inline && allowsInlineContentType(contentType)
+        ? contentDisposition(record.name, 'inline')
+        : contentDisposition(record.name)
+
       const headers = new Headers({
         'Cache-Control': 'private, no-store',
-        'Content-Disposition': contentDisposition(record.name),
-        'Content-Type': blob.contentType ?? record.mime_type ?? 'application/octet-stream',
+        'Content-Disposition': disposition,
+        'Content-Type': contentType,
         'X-Content-Type-Options': 'nosniff',
+        'Accept-Ranges': 'bytes',
       })
+      if (blob.range) {
+        headers.set('Content-Range', contentRange(blob.range.start, blob.range.end, blob.range.total))
+        headers.set('Content-Length', String(blob.sizeBytes))
+        return new Response(blob.body, { status: 206, headers })
+      }
       headers.set('Content-Length', String(blob.sizeBytes))
       return new Response(blob.body, { status: 200, headers })
     } catch (error) {

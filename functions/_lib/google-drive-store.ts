@@ -43,20 +43,27 @@ export class GoogleDriveStore implements BlobStore {
     }
   }
 
-  async get(id: string): Promise<BlobObject> {
+  async get(id: string, range?: { start: number; end: number }): Promise<BlobObject> {
     const head = await this.head(id)
-    const response = await this.client.authorizedFetch(
-      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`,
-    )
+    const response = range
+      ? await this.client.authorizedFetch(
+        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`,
+        { headers: { Range: `bytes=${range.start}-${range.end}` } },
+      )
+      : await this.client.authorizedFetch(
+        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`,
+      )
+    if (range && response.status !== 206) await this.mapResponseError(response)
     if (!response.ok) await this.mapResponseError(response)
     if (!response.body) throw new BlobStoreError('unavailable', 'google_drive_missing_body')
     return {
       objectKey: id,
       body: response.body,
-      sizeBytes: head.sizeBytes,
+      sizeBytes: range ? range.end - range.start + 1 : head.sizeBytes,
       metadata: {},
       contentType: head.contentType,
       etag: head.etag,
+      ...(range ? { range: { start: range.start, end: range.end, total: head.sizeBytes } } : {}),
     }
   }
 
