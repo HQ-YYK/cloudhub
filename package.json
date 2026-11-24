@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:frontend": "node --experimental-strip-types --test src/api/files.test.mjs src/api/auth.test.mjs src/api/admin.test.mjs src/api/uploads.test.mjs",
+    "test:frontend": "node --experimental-strip-types --test src/api/files.test.mjs src/api/auth.test.mjs src/api/admin.test.mjs src/api/uploads.test.mjs src/api/trash.test.mjs",
     "test:functions": "node --experimental-strip-types --test --test-concurrency=1 functions/**/*.test.ts"
   },
   "dependencies": {

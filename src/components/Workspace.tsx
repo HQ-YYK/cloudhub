@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from '../auth/useAuth'
 import CloudDrive from './CloudDrive'
+import TrashBin from './TrashBin'
 import ChangePassword from './ChangePassword'
 import AdminUsers from './AdminUsers'
 
@@ -20,12 +21,24 @@ function DriveIcon() {
   )
 }
 
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="21" height="21" fill="none" aria-hidden="true">
+      <path d="M4.5 7.25h15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M9.25 7V5.25A1.25 1.25 0 0 1 10.5 4h3a1.25 1.25 0 0 1 1.25 1.25V7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M6.5 7.25 7.3 19a1.75 1.75 0 0 0 1.74 1.5h5.92A1.75 1.75 0 0 0 16.7 19l.8-11.75" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M10 11.25v4.5M14 11.25v4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 export default function Workspace() {
   const { user, logout } = useAuth()
   const [activeModule, setActiveModule] = useState('drive')
   const [logoutError, setLogoutError] = useState('')
   const modules: Module[] = [
     { id: 'drive', label: '私有云盘', description: '浏览目录并创建文件夹。', icon: 'drive' },
+    { id: 'trash', label: '回收站', description: '查看和恢复已删除的文件。', icon: 'trash' },
     { id: 'account', label: '账号设置', description: '修改当前用户密码。', icon: '⚙' },
     ...(user?.role === 'admin'
       ? [{ id: 'admin', label: '用户管理', description: '查看和管理用户。', icon: '●' }]
@@ -58,8 +71,8 @@ export default function Workspace() {
               key={module.id}
               onClick={() => setActiveModule(module.id)}
             >
-              <span className={module.id === 'drive' ? 'sidebar-icon sidebar-drive-icon' : 'sidebar-icon'} aria-hidden="true">
-                {module.id === 'drive' ? <DriveIcon /> : module.icon}
+              <span className={module.id === 'drive' || module.id === 'trash' ? 'sidebar-icon sidebar-drive-icon' : 'sidebar-icon'} aria-hidden="true">
+                {module.id === 'drive' ? <DriveIcon /> : module.id === 'trash' ? <TrashIcon /> : module.icon}
               </span>
               <span>{module.label}</span>
             </button>
@@ -83,6 +96,7 @@ export default function Workspace() {
         </header>
         {logoutError && <p className="workspace-alert" role="alert">{logoutError}</p>}
         {activeModule === 'drive' && <CloudDrive />}
+        {activeModule === 'trash' && <TrashBin />}
         {activeModule === 'account' && <ChangePassword />}
         {activeModule === 'admin' && user?.role === 'admin' && <AdminUsers />}
       </main>
