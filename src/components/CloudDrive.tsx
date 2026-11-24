@@ -4,53 +4,18 @@ import {
   deleteFile,
   downloadFile,
   listFiles,
+  renameItem,
   type DriveItem,
   FilesRequestError,
 } from '../api/files'
+import { EmptyIcon, FileIcon, FolderIcon, MoreIcon, UploadIcon } from './DriveIcons'
+import MoveDialog from './MoveDialog'
+import RenameInput from './RenameInput'
 import { UploadQueue, type UploadQueueHandle } from './UploadQueue'
 
 type DirectoryLevel = {
   id: string | null
   name: string
-}
-
-function FolderIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="26" height="26" fill="none" aria-hidden="true">
-      <path d="M2.75 7.25A2.25 2.25 0 0 1 5 5h4.1l2.05 2.25H19A2.25 2.25 0 0 1 21.25 9.5v7.25A2.25 2.25 0 0 1 19 19H5a2.25 2.25 0 0 1-2.25-2.25V7.25Z" fill="currentColor" />
-      <path d="M2.75 10.25H21.25v6.5A2.25 2.25 0 0 1 19 19H5a2.25 2.25 0 0 1-2.25-2.25v-6.5Z" fill="white" fillOpacity=".22" />
-    </svg>
-  )
-}
-
-function FileIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="26" height="26" fill="none" aria-hidden="true">
-      <path d="M6.25 2.75h7.5l4 4v14.5H6.25a1.5 1.5 0 0 1-1.5-1.5V4.25a1.5 1.5 0 0 1 1.5-1.5Z" fill="#f0edff" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-      <path d="M13.75 2.75v4.25h4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-      <path d="M8 11.25h8M8 14.75h8M8 18.25h5.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-    </svg>
-  )
-}
-
-function EmptyIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="26" height="26" fill="none" aria-hidden="true">
-      <path d="M3.5 8.25h17l-1.25 10.5H4.75L3.5 8.25Z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-      <path d="M8 8.25V6.5a4 4 0 0 1 8 0v1.75" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      <path d="M3.75 13.25h5l1.25 1.5h4l1.25-1.5h5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
-function UploadIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" fill="none" aria-hidden="true">
-      <path d="M8 10.5V3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4.5 6.25 8 2.75l3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M2.75 10.5v1.25A1.5 1.5 0 0 0 4.25 13.25h7.5a1.5 1.5 0 0 0 1.5-1.5V10.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  )
 }
 
 function requestErrorMessage(error: unknown, action: 'list' | 'create' | 'download' | 'delete') {
@@ -74,6 +39,21 @@ function requestErrorMessage(error: unknown, action: 'list' | 'create' | 'downlo
     delete: '文件删除失败，请稍后重试。',
   } satisfies Record<typeof action, string>
   return messages[action]
+}
+
+function renameErrorMessage(error: unknown) {
+  if (error instanceof FilesRequestError) {
+    if (error.code === 'conflict') return '目标位置已有同名文件或文件夹'
+    if (error.code === 'invalid_move') return '不能移动到它自己的子文件夹里'
+    if (error.code === 'not_ready') return '文件还没上传完成'
+    if (error.code === 'invalid_name') return '名称无效，请检查后重试。'
+    if (error.code === 'password_change_required') return '请先修改密码'
+    if (error.status === 401) return '登录状态已失效，请重新登录后继续。'
+    if (error.status === 403) return '请求来源未通过安全校验，请刷新页面后重试。'
+    if (error.status === 404) return '目录或文件不存在或已不可访问。'
+    if (error.status === 0) return '网络连接失败，请检查网络后重试。'
+  }
+  return '重命名失败，请稍后重试。'
 }
 
 function formatFileSize(size: number | null) {
@@ -122,11 +102,16 @@ export default function CloudDrive() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [actionError, setActionError] = useState('')
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameSaving, setRenameSaving] = useState(false)
+  const [moveTarget, setMoveTarget] = useState<DriveItem | null>(null)
+  const [folderMenuId, setFolderMenuId] = useState<string | null>(null)
   const current = levels[levels.length - 1]
   const uploadQueueRef = useRef<UploadQueueHandle>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const currentIdRef = useRef(current.id)
   const dragDepthRef = useRef(0)
+  const cardBusy = downloadingId !== null || deletingId !== null || renamingId !== null || moveTarget !== null
 
   useEffect(() => {
     currentIdRef.current = current.id
@@ -144,6 +129,23 @@ export default function CloudDrive() {
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [folderFormOpen, creating])
+
+  useEffect(() => {
+    if (!folderMenuId) return
+    function handleDocumentMouseDown(event: MouseEvent) {
+      const target = event.target as Element | null
+      if (!target?.closest('.drive-folder-more')) setFolderMenuId(null)
+    }
+    function handleDocumentKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setFolderMenuId(null)
+    }
+    document.addEventListener('mousedown', handleDocumentMouseDown)
+    document.addEventListener('keydown', handleDocumentKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleDocumentMouseDown)
+      document.removeEventListener('keydown', handleDocumentKeyDown)
+    }
+  }, [folderMenuId])
 
   const loadDirectory = useCallback(async (parentId: string | null, mode: 'initial' | 'refresh' = 'initial') => {
     if (mode === 'initial') setLoading(true)
@@ -277,6 +279,47 @@ export default function CloudDrive() {
     }
   }
 
+  function startRename(item: DriveItem) {
+    setRenamingId(item.id)
+    setActionError('')
+    setFolderMenuId(null)
+  }
+
+  function cancelRename() {
+    setRenamingId(null)
+    setRenameSaving(false)
+  }
+
+  async function handleRenameSave(item: DriveItem, name: string) {
+    setRenameSaving(true)
+    setActionError('')
+    try {
+      await renameItem(item.id, name)
+      setRenamingId((active) => (active === item.id ? null : active))
+      await loadDirectory(current.id, 'refresh')
+    } catch (error) {
+      setRenamingId((active) => (active === item.id ? null : active))
+      setActionError(renameErrorMessage(error))
+    } finally {
+      setRenameSaving(false)
+    }
+  }
+
+  function startMove(item: DriveItem) {
+    setMoveTarget(item)
+    setFolderMenuId(null)
+    setActionError('')
+  }
+
+  function handleMoveDone() {
+    setMoveTarget(null)
+    void loadDirectory(current.id, 'refresh')
+  }
+
+  function toggleFolderMenu(id: string) {
+    setFolderMenuId((active) => (active === id ? null : id))
+  }
+
   return (
     <section className="drive-content" aria-labelledby="drive-heading">
       <div className="drive-toolbar">
@@ -362,26 +405,48 @@ export default function CloudDrive() {
           <div className="drive-grid">
             {items.map((item) => (
               item.kind === 'directory' ? (
-                <button className="drive-folder-card" type="button" key={item.id} onClick={() => enterDirectory(item)}>
-                  <span className="drive-folder-icon" aria-hidden="true"><FolderIcon /></span>
-                  <span className="drive-folder-name">{displayItemName(item.name, 'directory')}</span>
-                  <span className="drive-folder-action">进入目录</span>
-                </button>
+                <div className="drive-folder-card" key={item.id}>
+                  {renamingId === item.id ? (
+                    <RenameInput item={item} saving={renameSaving} onSave={(name) => void handleRenameSave(item, name)} onCancel={cancelRename} />
+                  ) : (
+                    <button className="drive-folder-main" type="button" onClick={() => enterDirectory(item)}>
+                      <span className="drive-folder-icon" aria-hidden="true"><FolderIcon /></span>
+                      <span className="drive-folder-name">{displayItemName(item.name, 'directory')}</span>
+                    </button>
+                  )}
+                  <div className="drive-folder-more">
+                    <button type="button" className="drive-more-button" aria-label={`${item.name} 更多操作`} onClick={() => toggleFolderMenu(item.id)} disabled={cardBusy}>
+                      <MoreIcon />
+                    </button>
+                    {folderMenuId === item.id && (
+                      <div className="drive-folder-menu" role="menu">
+                        <button type="button" role="menuitem" onClick={() => { setFolderMenuId(null); startRename(item) }}>改名</button>
+                        <button type="button" role="menuitem" onClick={() => { setFolderMenuId(null); startMove(item) }}>移动</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
               ) : (
                 <article className="drive-file-card" key={item.id}>
                   <div className="drive-file-heading">
                     <span className="drive-file-icon" aria-hidden="true"><FileIcon /></span>
-                    <strong className="drive-file-name" title={displayItemName(item.name, 'file')}>{displayItemName(item.name, 'file')}</strong>
+                    {renamingId === item.id ? (
+                      <RenameInput item={item} saving={renameSaving} onSave={(name) => void handleRenameSave(item, name)} onCancel={cancelRename} />
+                    ) : (
+                      <strong className="drive-file-name" title={displayItemName(item.name, 'file')}>{displayItemName(item.name, 'file')}</strong>
+                    )}
                   </div>
                   <div className="drive-file-meta">
                     <span>{formatFileSize(item.size_bytes)} · {item.mime_type ?? '类型未知'}</span>
                     <span>{formatUpdatedAt(item.updated_at)}</span>
                   </div>
                   <div className="drive-file-actions">
-                    <button type="button" onClick={() => void handleDownload(item)} disabled={downloadingId !== null || deletingId !== null}>
+                    <button type="button" onClick={() => void handleDownload(item)} disabled={cardBusy}>
                       {downloadingId === item.id ? '下载中…' : '下载'}
                     </button>
-                    <button type="button" className="danger-text-button" onClick={() => void handleDelete(item)} disabled={downloadingId !== null || deletingId !== null}>
+                    <button type="button" onClick={() => startRename(item)} disabled={cardBusy}>改名</button>
+                    <button type="button" onClick={() => startMove(item)} disabled={cardBusy}>移动</button>
+                    <button type="button" className="danger-text-button" onClick={() => void handleDelete(item)} disabled={cardBusy}>
                       {deletingId === item.id ? '删除中…' : '删除'}
                     </button>
                   </div>
@@ -391,6 +456,15 @@ export default function CloudDrive() {
           </div>
         )}
       </div>
+      {moveTarget && (
+        <MoveDialog
+          item={moveTarget}
+          parentName={current.name}
+          onClose={() => setMoveTarget(null)}
+          onMoved={handleMoveDone}
+          onError={(message) => setActionError(message)}
+        />
+      )}
     </section>
   )
 }

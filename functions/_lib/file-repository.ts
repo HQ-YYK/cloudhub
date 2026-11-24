@@ -98,6 +98,19 @@ export interface FileRepository {
   ): Promise<FileRecord | null>
 }
 
+export interface MoveRepository {
+  findItem(ownerId: string, id: string): Promise<FileRecord | null>
+  isDescendantOrSelf(ownerId: string, ancestorId: string, candidateId: string): Promise<boolean>
+  updateNameAndParent(
+    ownerId: string,
+    id: string,
+    name: string,
+    nameKey: string,
+    parentId: string | null,
+    updatedAt: string,
+  ): Promise<FileRecord | null>
+}
+
 export interface TrashItem {
   id: string
   owner_id: string

@@ -120,3 +120,21 @@ export async function deleteFile(fileId: string): Promise<void> {
   })
   if (payload.deleted !== true) throw new FilesRequestError(500, 'invalid_response')
 }
+
+export async function renameItem(id: string, name: string): Promise<DriveItem> {
+  const payload = await requestFiles(`/api/files/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  })
+  if (!payload.item) throw new FilesRequestError(500, 'invalid_response')
+  return payload.item
+}
+
+export async function moveItem(id: string, parentId: string | null): Promise<DriveItem> {
+  const payload = await requestFiles(`/api/files/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ parentId }),
+  })
+  if (!payload.item) throw new FilesRequestError(500, 'invalid_response')
+  return payload.item
+}

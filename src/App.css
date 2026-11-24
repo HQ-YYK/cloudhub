@@ -90,11 +90,18 @@
 .drive-state p { margin: 0; color: var(--muted); font-size: 12px; }
 .drive-drop-overlay { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; padding: 24px; color: var(--blue); background: rgba(237, 242, 255, .95); border: 2px dashed #7c9bf2; border-radius: 12px; font-size: 14px; font-weight: 650; pointer-events: none; }
 .drive-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
-.drive-folder-card { display: grid; grid-template-columns: auto 1fr; gap: 3px 11px; padding: 16px; color: var(--ink); background: #fbfcff; border: 1px solid #e1e6f0; border-radius: 10px; text-align: left; transition: border .2s, box-shadow .2s, transform .2s; }
+.drive-folder-card { display: flex; flex-direction: column; gap: 10px; padding: 14px 14px 10px; color: var(--ink); background: #fbfcff; border: 1px solid #e1e6f0; border-radius: 10px; transition: border .2s, box-shadow .2s, transform .2s; }
 .drive-folder-card:hover { border-color: #b8c9f5; box-shadow: 0 8px 20px rgba(44, 70, 126, .08); transform: translateY(-1px); }
-.drive-folder-icon { display: grid; place-items: center; grid-row: span 2; width: 24px; height: 24px; color: var(--blue); line-height: 1; }
+.drive-folder-main { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0; color: inherit; background: transparent; border: 0; text-align: left; }
+.drive-folder-icon { display: grid; place-items: center; width: 24px; height: 24px; color: var(--blue); line-height: 1; flex-shrink: 0; }
 .drive-folder-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; }
-.drive-folder-action { color: #9aa5b7; font-size: 10px; }
+.drive-folder-more { position: relative; display: flex; justify-content: flex-end; }
+.drive-more-button { display: grid; place-items: center; width: 26px; height: 26px; color: #8692a7; background: transparent; border: 0; border-radius: 6px; }
+.drive-more-button:hover:not(:disabled) { color: var(--blue); background: #edf2ff; }
+.drive-more-button:disabled { cursor: wait; opacity: .65; }
+.drive-folder-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 6; min-width: 120px; padding: 5px; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 12px 30px rgba(36, 57, 105, .12); }
+.drive-folder-menu button { display: block; width: 100%; padding: 7px 10px; color: var(--ink); background: transparent; border: 0; border-radius: 6px; text-align: left; font-size: 12px; }
+.drive-folder-menu button:hover { color: var(--blue); background: #edf2ff; }
 .drive-file-card { display: grid; gap: 13px; padding: 16px; background: #fff; border: 1px solid #e1e6f0; border-radius: 10px; }
 .drive-file-heading { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .drive-file-icon { display: grid; place-items: center; flex: 0 0 auto; width: 31px; height: 31px; color: #7658ed; background: #f0edff; border-radius: 9px; }
@@ -104,6 +111,31 @@
 .drive-file-actions button { padding: 0; color: var(--blue); background: transparent; border: 0; font-size: 11px; font-weight: 700; }
 .drive-file-actions button:disabled { cursor: wait; opacity: .65; }
 .drive-file-actions .danger-text-button { color: #c64f5c; }
+.drive-rename-input { min-width: 0; padding: 4px 8px; color: var(--ink); background: #fff; border: 1px solid #b8c9f5; border-radius: 6px; font: inherit; font-size: 13px; outline: none; }
+.drive-rename-input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(53, 104, 239, .12); }
+.drive-rename-input:disabled { cursor: wait; opacity: .65; }
+.drive-file-heading .drive-rename-input { flex: 1; }
+.drive-folder-card .drive-rename-input { width: 100%; }
+.move-dialog-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 24px; background: rgba(30, 41, 66, .45); }
+.move-dialog { width: min(100%, 380px); max-height: min(80vh, 560px); display: flex; flex-direction: column; overflow: hidden; background: #fff; border-radius: 14px; box-shadow: 0 24px 70px rgba(36, 57, 105, .25); outline: none; }
+.move-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+.move-dialog-header h3 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; letter-spacing: -.2px; }
+.move-dialog-close { display: grid; place-items: center; width: 28px; height: 28px; color: #8692a7; background: transparent; border: 0; border-radius: 6px; flex-shrink: 0; }
+.move-dialog-close:hover { color: var(--ink); background: #f0f3f8; }
+.move-dialog-tree { flex: 1; overflow: auto; padding: 10px 8px; }
+.move-tree-row { display: flex; align-items: center; gap: 7px; width: 100%; padding: 7px 8px; color: var(--ink); background: transparent; border: 0; border-radius: 7px; text-align: left; font-size: 13px; }
+.move-tree-row:hover:not(.is-disabled) { background: #f0f4fc; }
+.move-tree-row.is-selected { color: var(--blue); background: #edf2ff; font-weight: 650; }
+.move-tree-row.is-disabled { color: #a6afc0; cursor: not-allowed; }
+.move-tree-toggle { display: grid; place-items: center; width: 14px; height: 14px; color: #9aa5b7; flex-shrink: 0; }
+.move-tree-toggle-spacer { width: 14px; height: 14px; }
+.move-tree-chevron { transition: transform .15s; }
+.move-tree-chevron.is-open { transform: rotate(90deg); }
+.move-tree-folder-icon { display: grid; place-items: center; width: 18px; height: 18px; color: var(--blue); flex-shrink: 0; }
+.move-tree-row.is-disabled .move-tree-folder-icon { color: #b6bfcf; }
+.move-tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.move-tree-loading { margin: 4px 0 4px 34px; color: #9aa5b7; font-size: 11px; }
+.move-dialog-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 18px; border-top: 1px solid var(--line); }
 
 .trash-content { max-width: 980px; }
 .trash-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 28px; margin-bottom: 24px; }
