@@ -141,9 +141,21 @@ export class MockBlobStore implements BlobStore {
     return toHead(input.objectKey, blob)
   }
 
-  async get(objectKey: string) {
+  async get(objectKey: string, range?: { start: number; end: number }) {
     const blob = this.blobs.get(objectKey)
     if (!blob) throw new BlobStoreError('not_found', 'blob_not_found')
+    if (range) {
+      const bytes = blob.bytes.slice(range.start, range.end + 1)
+      return {
+        objectKey,
+        body: streamFromBytes(bytes),
+        sizeBytes: bytes.byteLength,
+        metadata: { ...blob.metadata },
+        contentType: blob.contentType,
+        etag: blob.etag,
+        range: { start: range.start, end: range.end, total: blob.bytes.byteLength },
+      } satisfies BlobObject
+    }
     return {
       ...toHead(objectKey, blob),
       body: streamFromBytes(blob.bytes),

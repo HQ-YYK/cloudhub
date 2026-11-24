@@ -10,6 +10,11 @@ export interface BlobPutInput {
   overwrite?: boolean
 }
 
+export interface BlobRange {
+  start: number
+  end: number
+}
+
 export interface BlobObject {
   objectKey: string
   body: ReadableStream<Uint8Array>
@@ -17,6 +22,7 @@ export interface BlobObject {
   metadata: BlobMetadata
   contentType: string | null
   etag: string
+  range?: { start: number; end: number; total: number }
 }
 
 export interface BlobHead {
@@ -46,7 +52,7 @@ export class BlobStoreError extends Error {
 
 export interface BlobStore {
   put(input: BlobPutInput): Promise<BlobHead>
-  get(objectKey: string): Promise<BlobObject>
+  get(objectKey: string, range?: BlobRange): Promise<BlobObject>
   head(objectKey: string): Promise<BlobHead>
   delete(objectKey: string): Promise<void>
 }
