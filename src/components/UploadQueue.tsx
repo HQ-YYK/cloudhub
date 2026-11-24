@@ -21,6 +21,7 @@ type UploadQueueItem = {
 type SpeedSample = { time: number; receivedBytes: number }
 
 const SPEED_WINDOW_MS = 5000
+const MAX_CONCURRENT_UPLOADS = 3
 
 function uploadErrorMessage(error: unknown): string {
   if (error instanceof FilesRequestError) {
@@ -117,7 +118,7 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
     const [collapsed, setCollapsed] = useState(false)
     const itemsRef = useRef(items)
     const onItemDoneRef = useRef(onItemDone)
-    const busyRef = useRef(false)
+    const activeKeysRef = useRef(new Set<string>())
     const samplesRef = useRef(new Map<string, SpeedSample[]>())
 
     // Declared before the queue effect so refs are current when the queue runs.
@@ -144,46 +145,49 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
       samplesRef.current.delete(key)
     }, [])
 
-    const processQueue = useCallback(async () => {
-      if (busyRef.current) return
-      busyRef.current = true
+    const runUpload = useCallback(async (item: UploadQueueItem) => {
+      const controller = new AbortController()
+      controllersRef.current.set(item.key, controller)
+      patchItem(item.key, { status: 'uploading', error: '' })
       try {
-        while (true) {
-          const next = itemsRef.current.find((item) => item.status === 'waiting')
-          if (!next) break
-          const controller = new AbortController()
-          controllersRef.current.set(next.key, controller)
-          patchItem(next.key, { status: 'uploading', error: '' })
-          try {
-            await uploadFile(next.file, next.parentId, {
-              onProgress: (receivedBytes, totalBytes) => {
-                recordSample(next.key, receivedBytes)
-                patchItem(next.key, { receivedBytes, totalBytes })
-              },
-              signal: controller.signal,
-            })
-            patchItem(next.key, { status: 'done', receivedBytes: next.file.size, totalBytes: next.file.size })
-            dropSamples(next.key)
-            onItemDoneRef.current(next.parentId)
-          } catch (error) {
-            dropSamples(next.key)
-            if (error instanceof UploadsRequestError && error.code === 'aborted') {
-              patchItem(next.key, { status: 'cancelled' })
-            } else {
-              patchItem(next.key, { status: 'failed', error: uploadErrorMessage(error) })
-            }
-          } finally {
-            controllersRef.current.delete(next.key)
-          }
+        await uploadFile(item.file, item.parentId, {
+          onProgress: (receivedBytes, totalBytes) => {
+            recordSample(item.key, receivedBytes)
+            patchItem(item.key, { receivedBytes, totalBytes })
+          },
+          signal: controller.signal,
+        })
+        patchItem(item.key, { status: 'done', receivedBytes: item.file.size, totalBytes: item.file.size })
+        dropSamples(item.key)
+        onItemDoneRef.current(item.parentId)
+      } catch (error) {
+        dropSamples(item.key)
+        if (error instanceof UploadsRequestError && error.code === 'aborted') {
+          patchItem(item.key, { status: 'cancelled' })
+        } else {
+          patchItem(item.key, { status: 'failed', error: uploadErrorMessage(error) })
         }
       } finally {
-        busyRef.current = false
+        controllersRef.current.delete(item.key)
+        activeKeysRef.current.delete(item.key)
       }
     }, [patchItem, recordSample, dropSamples])
 
+    const pump = useCallback(() => {
+      const available = MAX_CONCURRENT_UPLOADS - activeKeysRef.current.size
+      if (available <= 0) return
+      const waiting = itemsRef.current
+        .filter((item) => item.status === 'waiting' && !activeKeysRef.current.has(item.key))
+        .slice(0, available)
+      for (const item of waiting) {
+        activeKeysRef.current.add(item.key)
+        void runUpload(item)
+      }
+    }, [runUpload])
+
     useEffect(() => {
-      void processQueue()
-    }, [items, processQueue])
+      void pump()
+    }, [items, pump])
 
     const enqueue = useCallback((files: File[], parentId: string | null) => {
       const additions = files.map((file) => {
@@ -225,6 +229,7 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
     const close = useCallback(() => {
       for (const controller of controllersRef.current.values()) controller.abort()
       controllersRef.current.clear()
+      activeKeysRef.current.clear()
       samplesRef.current.clear()
       setItems([])
     }, [])
@@ -238,6 +243,12 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
     const totalReceived = activeItems.reduce((sum, item) => sum + item.receivedBytes, 0)
     const totalBytes = activeItems.reduce((sum, item) => sum + item.totalBytes, 0)
     const totalPercent = totalBytes > 0 ? Math.min(100, Math.round((totalReceived / totalBytes) * 100)) : 0
+    const uploadingCount = items.filter((item) => item.status === 'uploading').length
+    const totalSpeed = items.filter((item) => item.status === 'uploading').reduce((sum, item) => {
+      const speed = computeSpeed(samplesRef.current.get(item.key) ?? [])
+      return sum + (speed ?? 0)
+    }, 0)
+    const totalSpeedLabel = uploadingCount > 1 && totalSpeed > 0 ? ` · ${formatSpeed(totalSpeed)}` : ''
 
     useEffect(() => {
       if (!hasInProgress) return
@@ -257,7 +268,7 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
           <div className="upload-queue-title">
             <h3>上传队列</h3>
             <span className="upload-queue-count">已完成 {doneCount} / 共 {items.length}</span>
-            {hasInProgress && <span className="upload-queue-total-percent">{totalPercent}%</span>}
+            {hasInProgress && <span className="upload-queue-total-percent">{totalPercent}%{totalSpeedLabel}</span>}
           </div>
           <div className="upload-queue-header-actions">
             {hasCompleted && <button type="button" onClick={clearCompleted}>清除已完成</button>}

@@ -264,7 +264,7 @@ export default function CloudDrive() {
   }
 
   async function handleDelete(item: DriveItem) {
-    if (!window.confirm(`确定删除文件“${item.name}”吗？删除后将无法在当前列表中恢复。`)) return
+    if (!window.confirm(`确定把“${item.name}”移到回收站吗？30 天内可以在回收站恢复。`)) return
     setDeletingId(item.id)
     setActionError('')
     try {

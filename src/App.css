@@ -81,7 +81,7 @@
 .upload-file-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .drive-form-error { margin: 8px 0 0; color: #c64f5c; font-size: 11px; }
 .drive-alert { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 16px; padding: 11px 14px; color: #a24b58; background: #fff0f1; border: 1px solid #f5d5d9; border-radius: 8px; font-size: 13px; }
-.drive-alert button { padding: 0; color: #a24b58; background: transparent; border: 0; font-size: 12px; font-weight: 700; }
+.drive-alert button { padding: 0; color: #a24b58; background: transparent; border: 0; font-size: 12px; font-weight: 700; flex-shrink: 0; white-space: nowrap; }
 .drive-alert button:hover { color: #7e303d; }
 .drive-list-panel { position: relative; min-height: 260px; padding: 24px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
 .drive-state { display: grid; justify-items: center; min-height: 210px; align-content: center; margin: 0; text-align: center; }
@@ -104,6 +104,19 @@
 .drive-file-actions button { padding: 0; color: var(--blue); background: transparent; border: 0; font-size: 11px; font-weight: 700; }
 .drive-file-actions button:disabled { cursor: wait; opacity: .65; }
 .drive-file-actions .danger-text-button { color: #c64f5c; }
+
+.trash-content { max-width: 980px; }
+.trash-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 28px; margin-bottom: 24px; }
+.trash-toolbar h2 { margin: 8px 0 5px; font-size: 23px; letter-spacing: -.7px; }
+.trash-description { margin: 0; color: var(--muted); font-size: 13px; }
+.trash-actions { display: flex; align-items: flex-end; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.danger-small-button { height: 40px; padding: 0 13px; color: #c64f5c; background: #fff; border: 1px solid #f5d5d9; border-radius: 8px; font-size: 12px; font-weight: 700; }
+.danger-small-button:hover:not(:disabled) { color: #a24b58; border-color: #e2a7ae; }
+.danger-small-button:disabled { cursor: wait; opacity: .65; }
+.trash-notice { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 16px; padding: 11px 14px; color: #2f6b4f; background: #ecf7f1; border: 1px solid #cfe8db; border-radius: 8px; font-size: 13px; }
+.trash-notice button { padding: 0; color: #2f6b4f; background: transparent; border: 0; font-size: 12px; font-weight: 700; }
+.trash-notice button:hover { color: #1e503a; }
+.trash-list-panel { min-height: 260px; padding: 24px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
 
 .upload-queue { margin-bottom: 16px; padding: 16px 18px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
 .upload-queue-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
@@ -182,4 +195,6 @@
   .admin-users-toolbar { align-items: center; }
   .admin-table-panel { max-width: calc(100vw - 32px); }
   .upload-queue-name { flex-basis: 100%; }
+  .trash-toolbar { display: grid; gap: 20px; }
+  .trash-actions { display: grid; grid-template-columns: repeat(2, 1fr); width: 100%; }
 }
