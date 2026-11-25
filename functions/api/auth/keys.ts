@@ -33,7 +33,6 @@ export function createKeysHandler(
       if (!stored) return jsonResponse({ error: 'unauthorized' }, 401)
 
       return jsonResponse({
-        legacy: stored.kdf_salt === null,
         kdfSalt: stored.kdf_salt,
         kdfIterations: stored.kdf_iterations,
         wrappedMasterKey: stored.wrapped_master_key,

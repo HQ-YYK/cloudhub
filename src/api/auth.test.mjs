@@ -31,37 +31,22 @@ function baseUser(overrides = {}) {
     username: 'alice',
     role: 'user',
     mustChangePassword: false,
-    legacy: false,
     keysReady: true,
     ...overrides,
   }
 }
 
-test('prelogin posts the username and reports a legacy account', async () => {
+test('prelogin posts the username and returns kdf parameters', async () => {
   let request
   const restore = mockFetch(
-    new Response(JSON.stringify({ legacy: true }), { headers: { 'Content-Type': 'application/json' } }),
+    new Response(JSON.stringify({ kdfSalt: 'test-salt', kdfIterations: 600000 }), { headers: { 'Content-Type': 'application/json' } }),
     (input, init) => { request = { input, init } },
   )
   try {
-    assert.deepEqual(await prelogin('alice'), { legacy: true })
+    assert.deepEqual(await prelogin('alice'), { kdfSalt: 'test-salt', kdfIterations: 600000 })
     assert.equal(request.input, '/api/auth/prelogin')
     assert.equal(request.init.method, 'POST')
     assert.deepEqual(JSON.parse(request.init.body), { username: 'alice' })
-  } finally {
-    restore()
-  }
-})
-
-test('prelogin returns kdf parameters for a new-format account', async () => {
-  let request
-  const restore = mockFetch(
-    new Response(JSON.stringify({ legacy: false, kdfSalt: 'salt-b64', kdfIterations: 600000 }), { headers: { 'Content-Type': 'application/json' } }),
-    (input, init) => { request = { input, init } },
-  )
-  try {
-    assert.deepEqual(await prelogin('alice'), { legacy: false, kdfSalt: 'salt-b64', kdfIterations: 600000 })
-    assert.equal(request.input, '/api/auth/prelogin')
   } finally {
     restore()
   }
@@ -74,24 +59,10 @@ test('login posts an authKey credential and returns the user when TOTP is off', 
     (input, init) => { request = { input, init } },
   )
   try {
-    assert.deepEqual(await login({ username: 'alice', authKey: 'auth-key-b64' }), { user: { ...baseUser(), totpEnabled: false } })
+    assert.deepEqual(await login({ username: 'alice', authKey: 'test-auth-key' }), { user: { ...baseUser(), totpEnabled: false } })
     assert.equal(request.input, '/api/auth/login')
     assert.equal(request.init.method, 'POST')
-    assert.deepEqual(JSON.parse(request.init.body), { username: 'alice', authKey: 'auth-key-b64' })
-  } finally {
-    restore()
-  }
-})
-
-test('login posts a password credential for a legacy account', async () => {
-  let request
-  const restore = mockFetch(
-    new Response(JSON.stringify({ user: baseUser({ legacy: true }) }), { headers: { 'Content-Type': 'application/json' } }),
-    (input, init) => { request = { input, init } },
-  )
-  try {
-    await login({ username: 'alice', password: 'correct-horse' })
-    assert.deepEqual(JSON.parse(request.init.body), { username: 'alice', password: 'correct-horse' })
+    assert.deepEqual(JSON.parse(request.init.body), { username: 'alice', authKey: 'test-auth-key' })
   } finally {
     restore()
   }
@@ -104,9 +75,9 @@ test('login returns the challenge when TOTP is required', async () => {
     (input, init) => { request = { input, init } },
   )
   try {
-    assert.deepEqual(await login({ username: 'alice', authKey: 'auth-key-b64' }), { totpRequired: true, challenge: 'challenge-token' })
+    assert.deepEqual(await login({ username: 'alice', authKey: 'test-auth-key' }), { totpRequired: true, challenge: 'challenge-token' })
     assert.equal(request.input, '/api/auth/login')
-    assert.deepEqual(JSON.parse(request.init.body), { username: 'alice', authKey: 'auth-key-b64' })
+    assert.deepEqual(JSON.parse(request.init.body), { username: 'alice', authKey: 'test-auth-key' })
   } finally {
     restore()
   }
@@ -119,7 +90,7 @@ test('login reports backend error codes', async () => {
   )
   try {
     await assert.rejects(
-      login({ username: 'alice', password: 'wrong-password' }),
+      login({ username: 'alice', authKey: 'wrong-auth-key' }),
       (error) => error instanceof AuthRequestError && error.status === 401 && error.code === 'invalid_credentials',
     )
   } finally {
@@ -128,7 +99,7 @@ test('login reports backend error codes', async () => {
 })
 
 test('getKeys returns the keys payload', async () => {
-  const payload = { legacy: false, kdfSalt: 'salt-b64', kdfIterations: 600000, wrappedMasterKey: 'wrapped-mk', recoveryWrappedKey: 'wrapped-recovery' }
+  const payload = { kdfSalt: 'test-salt', kdfIterations: 600000, wrappedMasterKey: 'wrapped-mk', recoveryWrappedKey: 'wrapped-recovery' }
   let request
   const restore = mockFetch(
     new Response(JSON.stringify(payload), { headers: { 'Content-Type': 'application/json' } }),
@@ -222,24 +193,10 @@ test('disableTotp posts the authKey and code', async () => {
     (input, init) => { request = { input, init } },
   )
   try {
-    await disableTotp({ authKey: 'auth-key-b64' }, '123456')
+    await disableTotp({ authKey: 'test-auth-key' }, '123456')
     assert.equal(request.input, '/api/auth/totp/disable')
     assert.equal(request.init.method, 'POST')
-    assert.deepEqual(JSON.parse(request.init.body), { authKey: 'auth-key-b64', code: '123456' })
-  } finally {
-    restore()
-  }
-})
-
-test('disableTotp posts the password and code', async () => {
-  let request
-  const restore = mockFetch(
-    new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } }),
-    (input, init) => { request = { input, init } },
-  )
-  try {
-    await disableTotp({ password: 'test-password' }, '123456')
-    assert.deepEqual(JSON.parse(request.init.body), { password: 'test-password', code: '123456' })
+    assert.deepEqual(JSON.parse(request.init.body), { authKey: 'test-auth-key', code: '123456' })
   } finally {
     restore()
   }

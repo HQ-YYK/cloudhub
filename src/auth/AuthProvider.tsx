@@ -40,7 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const finishLogin = useCallback(async (authenticatedUser: AuthUser, credential: AccountCredential) => {
-    if (authenticatedUser.legacy || !authenticatedUser.keysReady || authenticatedUser.mustChangePassword) {
+    if (!authenticatedUser.keysReady || authenticatedUser.mustChangePassword) {
       setPendingCredential(credential)
       setUser(authenticatedUser)
       setStatus('authenticated')
@@ -60,9 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setError(null)
     try {
       const credential = await credentialFor(username.trim(), password)
-      const loginCredential: LoginCredential = 'password' in credential
-        ? { username: username.trim(), password: credential.password }
-        : { username: username.trim(), authKey: credential.authKey }
+      const loginCredential: LoginCredential = { username: username.trim(), authKey: credential.authKey }
       const result = await loginRequest(loginCredential)
       if ('totpRequired' in result) {
         setPendingCredential(credential)
@@ -118,7 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const completeKeySetup = useCallback((mk: Uint8Array<ArrayBuffer>) => {
     setMasterKeyState(mk)
     setPendingCredential(null)
-    setUser((current) => current ? { ...current, legacy: false, keysReady: true, mustChangePassword: false } : current)
+    setUser((current) => current ? { ...current, keysReady: true, mustChangePassword: false } : current)
   }, [])
 
   const clearError = useCallback(() => setError(null), [])

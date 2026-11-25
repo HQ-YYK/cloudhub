@@ -50,7 +50,6 @@ export function createPasswordHandler(
 
     let payload: {
       currentAuthKey?: unknown
-      currentPassword?: unknown
       newKdfSalt?: unknown
       newAuthKey?: unknown
       wrappedMasterKey?: unknown
@@ -98,30 +97,16 @@ export function createPasswordHandler(
       const attempt = await getLoginAttempt(repository, user.username, ipHash)
       if (isLoginBlocked(attempt, now)) return jsonResponse({ error: 'invalid_credentials' }, 400)
 
-      const legacy = stored.kdf_salt === null
-      let credentialMatches = false
-      if (legacy) {
-        const currentPassword = payload.currentPassword
-        if (typeof currentPassword !== 'string' || currentPassword.length < 1 || currentPassword.length > 256) {
-          return jsonResponse({ error: 'invalid_request' }, 400)
-        }
-        credentialMatches = await verifyPassword(
-          currentPassword,
-          stored.password_hash,
-          stored.password_salt,
-          stored.password_iterations,
-        )
-      } else {
-        if (!isValidAuthKey(payload.currentAuthKey)) {
-          return jsonResponse({ error: 'invalid_request' }, 400)
-        }
-        credentialMatches = await verifyPassword(
-          payload.currentAuthKey,
-          stored.password_hash,
-          stored.password_salt,
-          stored.password_iterations,
-        )
+      if (!isValidAuthKey(payload.currentAuthKey)) {
+        return jsonResponse({ error: 'invalid_request' }, 400)
       }
+      const currentAuthKey = payload.currentAuthKey
+      const credentialMatches = await verifyPassword(
+        currentAuthKey,
+        stored.password_hash,
+        stored.password_salt,
+        stored.password_iterations,
+      )
 
       if (!credentialMatches) {
         await recordLoginFailure(repository, user.username, ipHash, now)

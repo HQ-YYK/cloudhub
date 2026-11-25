@@ -42,10 +42,6 @@ export default function ChangePassword() {
     setSubmitting(true)
     try {
       const credential = await credentialFor(user.username, currentPassword)
-      if (!('authKey' in credential)) {
-        setError('当前账号格式不支持修改密码')
-        return
-      }
       const kdfSalt = generateKdfSalt()
       const derived = await deriveFromPassword(newPassword, kdfSalt)
       const wrappedMasterKey = await wrapMasterKey(masterKey, derived.wrapKey, user.id)

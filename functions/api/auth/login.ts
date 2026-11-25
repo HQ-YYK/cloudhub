@@ -83,17 +83,11 @@ export function createLoginHandler(
       return jsonResponse({ error: 'invalid_request' }, 400)
     }
 
-    const hasPassword = typeof payload.password === 'string'
-    const hasAuthKey = typeof payload.authKey === 'string'
-    if (hasPassword === hasAuthKey) return jsonResponse({ error: 'invalid_request' }, 400)
+    if ('password' in payload || !isValidAuthKey(payload.authKey)) {
+      return jsonResponse({ error: 'invalid_request' }, 400)
+    }
 
-    const credential = (hasPassword ? payload.password : payload.authKey) as string
-    if (hasPassword && (credential.length < 1 || credential.length > 256)) {
-      return jsonResponse({ error: 'invalid_request' }, 400)
-    }
-    if (hasAuthKey && !isValidAuthKey(payload.authKey)) {
-      return jsonResponse({ error: 'invalid_request' }, 400)
-    }
+    const authKey = payload.authKey as string
 
     const repository = dependencies.createAuthRepository(context.env)
     const ip = context.request.headers.get('CF-Connecting-IP') ?? 'unknown'
@@ -105,17 +99,16 @@ export function createLoginHandler(
       if (isLoginBlocked(attempt, now)) return jsonResponse(INVALID_LOGIN, 401)
 
       const user = await findUser(repository, payload.username)
-      const expectsPassword = (user?.kdf_salt ?? null) === null
       let credentialMatches = false
-      if (user && expectsPassword === hasPassword) {
+      if (user && user.kdf_salt !== null) {
         credentialMatches = await verifyPassword(
-          credential,
+          authKey,
           user.password_hash,
           user.password_salt,
           user.password_iterations,
         )
       } else {
-        await verifyPassword(credential, FAKE_USER.password_hash, FAKE_USER.password_salt, FAKE_USER.password_iterations)
+        await verifyPassword(authKey, FAKE_USER.password_hash, FAKE_USER.password_salt, FAKE_USER.password_iterations)
       }
       const valid = Boolean(user && user.disabled === 0 && credentialMatches)
 
@@ -159,7 +152,6 @@ export function createLoginHandler(
         username: user.username,
         role: user.role,
         mustChangePassword: user.must_change_password === 1,
-        legacy: user.kdf_salt === null,
         keysReady: user.wrapped_master_key !== null,
       } }, 200, {
         'Set-Cookie': sessionCookie(token),

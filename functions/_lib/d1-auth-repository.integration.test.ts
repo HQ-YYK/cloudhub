@@ -165,7 +165,7 @@ test('real local D1 login route rejects blocked requests without recording anoth
           Origin: 'https://cloudhub.test',
           'CF-Connecting-IP': routeIp,
         },
-        body: JSON.stringify({ username: routeUsername, password: 'wrong-password' }),
+        body: JSON.stringify({ username: routeUsername, authKey: 'A'.repeat(43) }),
       }),
       env: { DB: db },
     } as never)

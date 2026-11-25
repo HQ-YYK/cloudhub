@@ -13,7 +13,6 @@ export interface PublicUser {
   role: 'admin' | 'user'
   mustChangePassword: boolean
   sessionId: string
-  legacy: boolean
   keysReady: boolean
 }
 
@@ -126,7 +125,6 @@ export async function getAuthenticatedUser(repository: AuthRepository, request: 
     role: row.role,
     mustChangePassword: row.must_change_password === 1,
     sessionId: row.session_id,
-    legacy: (row.kdf_salt ?? null) === null,
     keysReady: (row.wrapped_master_key ?? null) !== null,
   } satisfies PublicUser
 }

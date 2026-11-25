@@ -15,7 +15,7 @@ export function authScreen(
 ): AuthScreen {
   if (status === 'loading') return 'loading'
   if (status === 'anonymous' || !user) return 'login'
-  if (user.legacy || !user.keysReady) return 'setup'
+  if (!user.keysReady) return 'setup'
   if (user.mustChangePassword) return 'recovery'
   if (!masterKey) return 'unlock'
   return 'workspace'

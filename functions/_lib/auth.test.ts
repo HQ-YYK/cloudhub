@@ -103,7 +103,7 @@ test('hashPassword rejects iterations above the PBKDF2 limit', async () => {
   )
 })
 
-test('verifyPassword rejects legacy high-iteration records without throwing', async () => {
+test('verifyPassword rejects high-iteration records without throwing', async () => {
   const stored = await hashPassword('password')
   assert.equal(await verifyPassword('password', stored.hash, stored.salt, 100000 * 3 + 10000), false)
 })
@@ -143,7 +143,6 @@ test('authenticated user lookup rejects an expired or disabled session', async (
     role: 'user',
     mustChangePassword: false,
     sessionId: 'session-1',
-    legacy: true,
     keysReady: false,
   })
   assert.equal(validRepository.touchCount, 1)
@@ -281,7 +280,6 @@ test('me returns only public user fields', async () => {
     username: 'alice',
     role: 'admin',
     mustChangePassword: false,
-    legacy: false,
     keysReady: false,
     totpEnabled: false,
   })

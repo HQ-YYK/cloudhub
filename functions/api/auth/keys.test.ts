@@ -109,7 +109,6 @@ test('GET keys returns the stored key material for a new-format account', async 
   const response = await handler({ request: originRequest('GET', '/api/auth/keys'), env: env() } as never)
   assert.equal(response.status, 200)
   assert.deepEqual(await response.json(), {
-    legacy: false,
     kdfSalt,
     kdfIterations: 600000,
     wrappedMasterKey: wrapped,
@@ -117,14 +116,13 @@ test('GET keys returns the stored key material for a new-format account', async 
   })
 })
 
-test('GET keys returns null key fields for a legacy account', async () => {
+test('GET keys returns null key fields for an account without key material', async () => {
   const current = repository(stored())
   const handler = createKeysHandler({ createAuthRepository: () => current.authRepository })
 
   const response = await handler({ request: originRequest('GET', '/api/auth/keys'), env: env() } as never)
   assert.equal(response.status, 200)
   assert.deepEqual(await response.json(), {
-    legacy: true,
     kdfSalt: null,
     kdfIterations: null,
     wrappedMasterKey: null,

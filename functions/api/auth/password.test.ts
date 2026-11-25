@@ -85,13 +85,15 @@ function repository(storedUser: StoredUser) {
   }
 }
 
-test('legacy account first-time setup requires a recovery key and stores new keys', async () => {
-  const legacyHash = await hashPassword('current-password')
+test('new-format account first-time setup requires a recovery key and stores new keys', async () => {
+  const currentHash = await hashPassword(authKey)
   const current = repository(stored({
-    password_hash: legacyHash.hash,
-    password_salt: legacyHash.salt,
-    password_iterations: legacyHash.iterations,
+    password_hash: currentHash.hash,
+    password_salt: currentHash.salt,
+    password_iterations: currentHash.iterations,
     must_change_password: 1,
+    kdf_salt: kdfSalt,
+    kdf_iterations: 600000,
   }))
   const handler = createPasswordHandler({
     createAuthRepository: () => current.authRepository,
@@ -101,7 +103,7 @@ test('legacy account first-time setup requires a recovery key and stores new key
 
   let response = await handler({
     request: originRequest('/api/auth/password', {
-      currentPassword: 'current-password',
+      currentAuthKey: authKey,
       newKdfSalt: kdfSalt,
       newAuthKey: authKey,
       wrappedMasterKey: wrapped,
@@ -113,7 +115,7 @@ test('legacy account first-time setup requires a recovery key and stores new key
 
   response = await handler({
     request: originRequest('/api/auth/password', {
-      currentPassword: 'current-password',
+      currentAuthKey: authKey,
       newKdfSalt: kdfSalt,
       newAuthKey: authKey,
       wrappedMasterKey: wrapped,
@@ -165,11 +167,15 @@ test('new-format account keeps its recovery key when none is provided', async ()
 })
 
 test('password change rejects malformed key fields before checking credentials', async () => {
-  const legacyHash = await hashPassword('current-password')
+  const currentHash = await hashPassword(authKey)
   const current = repository(stored({
-    password_hash: legacyHash.hash,
-    password_salt: legacyHash.salt,
-    password_iterations: legacyHash.iterations,
+    password_hash: currentHash.hash,
+    password_salt: currentHash.salt,
+    password_iterations: currentHash.iterations,
+    kdf_salt: kdfSalt,
+    kdf_iterations: 600000,
+    wrapped_master_key: wrapped,
+    recovery_wrapped_key: recovery,
   }))
   const handler = createPasswordHandler({
     createAuthRepository: () => current.authRepository,
@@ -178,7 +184,7 @@ test('password change rejects malformed key fields before checking credentials',
 
   const response = await handler({
     request: originRequest('/api/auth/password', {
-      currentPassword: 'current-password',
+      currentAuthKey: authKey,
       newKdfSalt: 'bad',
       newAuthKey: authKey,
       wrappedMasterKey: wrapped,
@@ -192,20 +198,25 @@ test('password change rejects malformed key fields before checking credentials',
 })
 
 test('password change records a login failure on a wrong current credential', async () => {
-  const legacyHash = await hashPassword('correct-password')
+  const currentHash = await hashPassword(authKey)
   const current = repository(stored({
-    password_hash: legacyHash.hash,
-    password_salt: legacyHash.salt,
-    password_iterations: legacyHash.iterations,
+    password_hash: currentHash.hash,
+    password_salt: currentHash.salt,
+    password_iterations: currentHash.iterations,
+    kdf_salt: kdfSalt,
+    kdf_iterations: 600000,
+    wrapped_master_key: wrapped,
+    recovery_wrapped_key: recovery,
   }))
   const handler = createPasswordHandler({
     createAuthRepository: () => current.authRepository,
     createKeysRepository: () => current.keysRepository,
   })
 
+  const wrongAuthKey = Buffer.alloc(32, 8).toString('base64url')
   const response = await handler({
     request: originRequest('/api/auth/password', {
-      currentPassword: 'wrong-password',
+      currentAuthKey: wrongAuthKey,
       newKdfSalt: kdfSalt,
       newAuthKey: authKey,
       wrappedMasterKey: wrapped,
@@ -219,7 +230,7 @@ test('password change records a login failure on a wrong current credential', as
   assert.equal(current.keyUpdates.length, 0)
 })
 
-test('new-format account rejects a legacy password credential type', async () => {
+test('password change rejects a missing current auth key', async () => {
   const currentAuthKey = Buffer.alloc(32, 9).toString('base64url')
   const currentHash = await hashPassword(currentAuthKey)
   const current = repository(stored({
@@ -238,7 +249,6 @@ test('new-format account rejects a legacy password credential type', async () =>
 
   const response = await handler({
     request: originRequest('/api/auth/password', {
-      currentPassword: 'anything',
       newKdfSalt: kdfSalt,
       newAuthKey: authKey,
       wrappedMasterKey: wrapped,
