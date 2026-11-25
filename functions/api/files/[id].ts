@@ -1,4 +1,5 @@
 import type { PagesFunction } from '@cloudflare/workers-types'
+import { getAuthenticatedUser } from '../../_lib/auth.ts'
 import type { AuthRepository } from '../../_lib/auth-repository.ts'
 import { BlobStoreError, type BlobStore } from '../../_lib/blob-store.ts'
 import type { AuthEnv } from '../../_lib/cloudflare-env.ts'
@@ -28,7 +29,7 @@ import type { StorageRepository } from '../../_lib/storage-repository.ts'
 interface DeleteDependencies {
   createAuthRepository: (env: AuthEnv) => AuthRepository
   createFileRepository: (env: AuthEnv) => FileRepository & FolderDeleteRepository
-  createBlobStore: (env: AuthEnv) => BlobStore
+  createBlobStore: (env: AuthEnv, accountId: number) => BlobStore
 }
 
 interface PatchDependencies {
@@ -78,7 +79,7 @@ export function createDeleteHandler(
         ...createD1FileTreeRepository(env.DB),
       }
     },
-    createBlobStore: createProductionBlobStore,
+    createBlobStore: (env, accountId) => createProductionBlobStore(env, accountId),
     ...overrides,
   }
 
@@ -99,10 +100,17 @@ export function createDeleteHandler(
     if (!context.env.DB) return jsonResponse({ error: 'storage_unavailable' }, 503)
 
     try {
+      const authRepository = dependencies.createAuthRepository(context.env)
+      const fileRepository = dependencies.createFileRepository(context.env)
+      const user = await getAuthenticatedUser(authRepository, context.request)
+      const accountId = user
+        ? (await fileRepository.findFile(user.id, rawId as string))?.storage_account_id ?? 1
+        : 1
+
       const result = await deleteItem(
-        dependencies.createAuthRepository(context.env),
-        dependencies.createFileRepository(context.env),
-        () => dependencies.createBlobStore(context.env),
+        authRepository,
+        fileRepository,
+        () => dependencies.createBlobStore(context.env, accountId),
         context.request,
         rawId as string,
       )

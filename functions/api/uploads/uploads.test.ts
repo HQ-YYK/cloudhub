@@ -236,6 +236,23 @@ function makeDriveClient(overrides: Partial<UploadDriveClient> = {}) {
   return { driveClient, createCalls, trashed, resumeCalls }
 }
 
+function activeAccount(): StorageAccount {
+  return {
+    id: 1,
+    google_email: 'test@example.com',
+    refresh_token_ciphertext: 'ciphertext',
+    refresh_token_iv: 'iv',
+    root_folder_id: 'root-folder',
+    connected_by: 'admin',
+    status: 'active',
+    quota_total: null,
+    quota_used: null,
+    quota_checked_at: '2030-01-01T00:00:00.000Z',
+    created_at: '2030-01-01T00:00:00.000Z',
+    updated_at: '2030-01-01T00:00:00.000Z',
+  }
+}
+
 function buildOverrides(options: {
   files?: FileRecord[]
   sessions?: UploadSession[]
@@ -247,10 +264,23 @@ function buildOverrides(options: {
   const { repository, files, sessions, userFolders } = makeFileRepository(options.files ?? [], options.sessions ?? [])
   if (options.userFolder !== undefined) userFolders.set(owner.id, options.userFolder)
 
+  const account = options.storageAccount === undefined ? activeAccount() : options.storageAccount
   const storageRepository: StorageRepository = {
-    getAccount: async () => options.storageAccount ?? null,
-    upsertAccount: async () => undefined,
+    getAccount: async () => account,
+    listAccounts: async () => (account ? [account] : []),
+    listAccountsWithStats: async () => [],
+    countAccounts: async () => (account ? 1 : 0),
+    findAccountByEmail: async () => null,
+    createAccount: async () => { throw new Error('not_implemented') },
+    updateAccountTokens: async () => null,
+    setAccountStatus: async () => null,
+    setAccountReauth: async () => undefined,
+    setAccountQuota: async () => undefined,
     deleteAccount: async () => undefined,
+    countFilesByAccount: async () => 0,
+    pendingBytesByAccount: async () => 0,
+    findUserFolder: async () => null,
+    setUserFolderIfEmpty: async () => true,
     deleteExpiredOAuthStates: async () => undefined,
     createOAuthState: async () => undefined,
     consumeOAuthState: async () => null,
@@ -315,7 +345,7 @@ test('create upload stores an encrypted session uri and hides it from responses'
 
   assert.equal(files[0].storage_status, 'pending')
   assert.equal(resumeCalls.length, 1)
-  assert.deepEqual(JSON.parse(String(resumeCalls[0].init?.body)), { name: 'report.pdf', parents: ['user-folder'] })
+  assert.deepEqual(JSON.parse(String(resumeCalls[0].init?.body)), { name: 'report.pdf', parents: ['folder-1'] })
   const headers = resumeCalls[0].init?.headers as Record<string, string>
   assert.equal(headers['X-Upload-Content-Type'], 'application/pdf')
   assert.equal(headers['X-Upload-Content-Length'], '1048576')
@@ -397,7 +427,7 @@ test('create upload reports storage_not_connected and storage_not_configured', a
   } as never)
   assert.equal(response.status, 503)
   assert.deepEqual(await response.json(), { error: 'storage_not_connected' })
-  assert.equal(notConnected.files[0].storage_status, 'failed')
+  assert.equal(notConnected.files.length, 0)
 
   const { driveClient } = makeDriveClient({
     authorizedFetch: async () => { throw new BlobStoreError('unavailable', 'storage_not_configured') },

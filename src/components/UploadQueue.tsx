@@ -28,6 +28,13 @@ function uploadErrorMessage(error: unknown): string {
     if (error.code === 'conflict') return '当前目录已有同名文件'
     if (error.code === 'storage_not_connected') return '管理员尚未连接 Google Drive'
     if (error.code === 'storage_not_configured') return '存储尚未配置'
+    if (error.code === 'storage_full') {
+      if (error instanceof UploadsRequestError && error.required !== null && error.largestAvailable !== null) {
+        return `存储空间不足：这个文件需要 ${formatBytes(error.required)}，目前单个文件最多能传 ${formatBytes(error.largestAvailable)}。请联系管理员。`
+      }
+      return '存储空间不足，请联系管理员'
+    }
+    if (error.code === 'storage_reauth_required') return '存储账号授权失效，请联系管理员重新授权'
     if (error.code === 'upload_expired') return '上传会话已过期，请重试'
     if (error.code === 'empty_file') return '不支持空文件'
     if (error.code === 'invalid_size') return '文件超过 10 GiB 上限'

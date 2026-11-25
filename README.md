@@ -9,6 +9,7 @@
 - **账号**：没有公开注册，账号由管理员创建。新账号和被重置密码的账号，首次登录必须先改密码
 - **两步验证**：支持 TOTP（RFC 6238），兼容常见的验证器 App，附带 10 个一次性恢复码。管理员可以给普通用户重置两步验证
 - **管理员**：可以创建、停用账号和重置密码，负责绑定存储。看不到别人的文件，也看不到任何人的密码，库里只存 PBKDF2 哈希
+- **多账号存储**：管理员可以在工作台的「存储」页添加多个 Google 账号，把空间串起来。每个文件只存在一个账号上，上传时自动选剩余空间最大的账号；账号可以设为只读、重新授权或移除
 - **上传**：大文件按 32 MiB 分片，经 Functions 中转给 Google Drive 的断点续传会话。断线后从已收到的字节继续传，传完校验大小并记录 Google 返回的 MD5。最多同时上传 3 个文件，支持拖拽
 - **下载**：支持 HTTP Range，浏览器自带的断点续传和多线程下载都能用
 - **文件管理**：目录、重命名、移动。目录树只存在 D1 里，重命名和移动不会动 Drive 上的文件
@@ -70,7 +71,7 @@ STORAGE_ENCRYPTION_KEY=...   # 32 字节随机数，base64url 编码
 3. 在 Pages 项目里设置 `GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET`、`STORAGE_ENCRYPTION_KEY` 这三个 secret
 4. 在 Google Cloud 创建 OAuth 客户端，回调地址填 `https://<你的域名>/api/storage/callback`，然后把应用发布为正式版
 5. 创建第一个管理员：用 `scripts/generate-password-hash.mjs` 在本地生成哈希，参照 `scripts/auth-seed.example.sql` 写入数据库，并把 `role` 设为 `admin`
-6. 用管理员登录后，在浏览器打开 `https://<你的域名>/api/storage/connect`，按提示授权 Google 账号
+6. 用管理员登录后，在工作台的「存储」页添加 Google 账号，按提示授权
 
 Workers 生产环境限制 PBKDF2 最多 100,000 次迭代，本项目就用这个值。
 

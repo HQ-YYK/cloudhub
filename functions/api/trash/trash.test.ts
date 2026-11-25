@@ -50,8 +50,20 @@ function authRepository(user = owner, authenticated = true): AuthRepository {
 function storageRepository(): StorageRepository {
   return {
     getAccount: async () => null,
-    upsertAccount: async () => undefined,
+    listAccounts: async () => [],
+    listAccountsWithStats: async () => [],
+    countAccounts: async () => 0,
+    findAccountByEmail: async () => null,
+    createAccount: async () => { throw new Error('not_implemented') },
+    updateAccountTokens: async () => null,
+    setAccountStatus: async () => null,
+    setAccountReauth: async () => undefined,
+    setAccountQuota: async () => undefined,
     deleteAccount: async () => undefined,
+    countFilesByAccount: async () => 0,
+    pendingBytesByAccount: async () => 0,
+    findUserFolder: async () => null,
+    setUserFolderIfEmpty: async () => false,
     deleteExpiredOAuthStates: async () => undefined,
     createOAuthState: async () => undefined,
     consumeOAuthState: async () => null,
@@ -103,6 +115,7 @@ function makeTrashRepository(initial: FileRecord[] = []) {
       created_at: record.created_at,
       updated_at: record.updated_at,
       deleted_at: record.deleted_at!,
+      storage_account_id: record.storage_account_id ?? null,
       parent_name: parent?.name ?? null,
       item_count: record.kind === 'directory'
         ? records.filter((candidate) => candidate.owner_id === record.owner_id
@@ -244,14 +257,14 @@ function makeTrashRepository(initial: FileRecord[] = []) {
           && record.storage_status !== 'deleting'
           && record.object_key !== null)
         .slice(0, limit)
-        .map((record) => ({ id: record.id, object_key: record.object_key! }))
+        .map((record) => ({ id: record.id, object_key: record.object_key!, storage_account_id: record.storage_account_id ?? null }))
     },
     async listTrashObjectKeys(ownerId, cutoff, limit) {
       return records
         .filter((record) => isTrashed(record, ownerId, cutoff) && record.kind === 'file' && record.object_key !== null)
         .sort((a, b) => (a.deleted_at! < b.deleted_at! ? -1 : 1))
         .slice(0, limit)
-        .map((record) => ({ id: record.id, object_key: record.object_key! }))
+        .map((record) => ({ id: record.id, object_key: record.object_key!, storage_account_id: record.storage_account_id ?? null }))
     },
     async countTrash(ownerId, cutoff) {
       return records.filter((record) => isTrashed(record, ownerId, cutoff) && record.kind === 'file').length
@@ -265,7 +278,7 @@ function makeTrashRepository(initial: FileRecord[] = []) {
           && record.object_key !== null)
         .sort((a, b) => (a.id < b.id ? -1 : 1))
         .slice(0, limit)
-        .map((record) => ({ id: record.id, object_key: record.object_key! }))
+        .map((record) => ({ id: record.id, object_key: record.object_key!, storage_account_id: record.storage_account_id ?? null }))
     },
     async countBatchFiles(ownerId, deletedAt) {
       return records.filter((record) => record.owner_id === ownerId

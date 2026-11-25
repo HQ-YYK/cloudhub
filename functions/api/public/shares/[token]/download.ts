@@ -9,7 +9,7 @@ import { shareErrorResponse, streamPublicShare } from '../../../../_lib/share-se
 
 interface PublicShareDownloadDependencies {
   createShareRepository: (env: AuthEnv) => ShareRepository
-  createBlobStore: (env: AuthEnv) => BlobStore
+  createBlobStore: (env: AuthEnv, accountId: number) => BlobStore
 }
 
 export function createPublicShareDownloadHandler(
@@ -20,7 +20,7 @@ export function createPublicShareDownloadHandler(
       if (!env.DB) throw new Error('database_configuration_missing')
       return createD1ShareRepository(env.DB)
     },
-    createBlobStore: createProductionBlobStore,
+    createBlobStore: (env, accountId) => createProductionBlobStore(env, accountId),
     ...overrides,
   }
 
@@ -29,7 +29,7 @@ export function createPublicShareDownloadHandler(
     try {
       return await streamPublicShare(
         dependencies.createShareRepository(context.env),
-        () => dependencies.createBlobStore(context.env),
+        (accountId) => dependencies.createBlobStore(context.env, accountId),
         context.request,
         context.params.token as string,
       )

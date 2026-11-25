@@ -4,11 +4,21 @@ export const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024
 
 export class UploadsRequestError extends FilesRequestError {
   readonly receivedBytes: number | null
+  readonly required: number | null
+  readonly largestAvailable: number | null
 
-  constructor(status: number, code: string, receivedBytes: number | null = null) {
+  constructor(
+    status: number,
+    code: string,
+    receivedBytes: number | null = null,
+    required: number | null = null,
+    largestAvailable: number | null = null,
+  ) {
     super(status, code)
     this.name = 'UploadsRequestError'
     this.receivedBytes = receivedBytes
+    this.required = required
+    this.largestAvailable = largestAvailable
   }
 }
 
@@ -21,6 +31,8 @@ type UploadResponse = {
   item?: DriveItem
   ok?: boolean
   error?: string
+  required?: number
+  largestAvailable?: number
 }
 
 type ChunkResult = {
@@ -55,7 +67,9 @@ async function requestUploads(path: string, init: RequestInit = {}, signal?: Abo
   }
   if (!response.ok) {
     const receivedBytes = typeof payload.receivedBytes === 'number' ? payload.receivedBytes : null
-    throw new UploadsRequestError(response.status, payload.error ?? 'request_failed', receivedBytes)
+    const required = typeof payload.required === 'number' ? payload.required : null
+    const largestAvailable = typeof payload.largestAvailable === 'number' ? payload.largestAvailable : null
+    throw new UploadsRequestError(response.status, payload.error ?? 'request_failed', receivedBytes, required, largestAvailable)
   }
   return payload
 }

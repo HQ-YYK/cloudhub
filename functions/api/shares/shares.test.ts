@@ -33,6 +33,7 @@ const fileId = 'file-1'
 
 interface StoredFile extends ShareFileInfo {
   owner_id: string
+  storage_account_id: number | null
 }
 
 function authRepository(user: typeof owner | null = owner): AuthRepository {
@@ -68,6 +69,7 @@ function shareFile(options: Partial<StoredFile> = {}): StoredFile {
     deleted_at: null,
     storage_status: 'ready',
     kind: 'file',
+    storage_account_id: null,
     ...options,
   }
 }
@@ -98,6 +100,7 @@ function toShareWithFile(share: ShareRecord, file: StoredFile): ShareWithFileRec
     file_deleted_at: file.deleted_at,
     file_storage_status: file.storage_status,
     file_kind: file.kind,
+    file_storage_account_id: file.storage_account_id ?? null,
   }
 }
 

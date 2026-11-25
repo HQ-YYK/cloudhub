@@ -7,6 +7,7 @@ import ChangePassword from './ChangePassword'
 import RegenerateRecoveryCode from './RegenerateRecoveryCode'
 import TotpSettings from './TotpSettings'
 import AdminUsers from './AdminUsers'
+import AdminStorage from './AdminStorage'
 
 type Module = {
   id: string
@@ -47,7 +48,10 @@ function ShareIcon() {
 
 export default function Workspace() {
   const { user, logout } = useAuth()
-  const [activeModule, setActiveModule] = useState('drive')
+  const [activeModule, setActiveModule] = useState(() => {
+    const module = new URLSearchParams(window.location.search).get('module')
+    return module === 'admin-storage' && user?.role === 'admin' ? 'admin-storage' : 'drive'
+  })
   const [logoutError, setLogoutError] = useState('')
   const modules: Module[] = [
     { id: 'drive', label: '私有云盘', description: '浏览目录并创建文件夹。', icon: 'drive' },
@@ -55,7 +59,10 @@ export default function Workspace() {
     { id: 'shares', label: '我的分享', description: '查看和管理已分享的文件链接。', icon: 'share' },
     { id: 'account', label: '账号设置', description: '修改密码与两步验证。', icon: '⚙' },
     ...(user?.role === 'admin'
-      ? [{ id: 'admin', label: '用户管理', description: '查看和管理用户。', icon: '●' }]
+      ? [
+          { id: 'admin', label: '用户管理', description: '查看和管理用户。', icon: '●' },
+          { id: 'admin-storage', label: '存储', description: '管理 Google 云盘账号。', icon: '▤' },
+        ]
       : []),
   ]
   const active = modules.find((module) => module.id === activeModule) ?? modules[0]
@@ -120,6 +127,7 @@ export default function Workspace() {
           </div>
         )}
         {activeModule === 'admin' && user?.role === 'admin' && <AdminUsers />}
+        {activeModule === 'admin-storage' && user?.role === 'admin' && <AdminStorage />}
       </main>
     </div>
   )

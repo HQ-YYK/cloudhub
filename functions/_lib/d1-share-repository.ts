@@ -15,7 +15,7 @@ const SHARE_WITH_FILE_COLUMNS = `
   f.name AS file_name, f.size_bytes AS file_size_bytes,
   f.mime_type AS file_mime_type, f.object_key AS file_object_key,
   f.deleted_at AS file_deleted_at, f.storage_status AS file_storage_status,
-  f.kind AS file_kind
+  f.kind AS file_kind, f.storage_account_id AS file_storage_account_id
 `
 
 export function createD1ShareRepository(db: D1Database): ShareRepository {

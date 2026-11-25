@@ -1,7 +1,8 @@
 import { getAuthenticatedUser } from './auth.ts'
 import type { AuthRepository } from './auth-repository.ts'
 import { BlobStoreError } from './blob-store.ts'
-import { ensureDriveFolder } from './drive-folders.ts'
+import type { AuthEnv } from './cloudflare-env.ts'
+import { ensureUserFolder } from './drive-folders.ts'
 import {
   FileRepositoryConflictError,
   type FileRepository,
@@ -15,7 +16,8 @@ import {
 } from './file-service.ts'
 import { clearAccessTokenCache } from './google-oauth.ts'
 import { decryptSecret, encryptSecret } from './secret-box.ts'
-import type { StorageRepository } from './storage-repository.ts'
+import type { StorageAccount, StorageRepository } from './storage-repository.ts'
+import { selectStorageAccount, StorageFullError } from './storage-selector.ts'
 
 export const CHUNK_SIZE = 32 * 1024 * 1024
 export const CHUNK_ALIGNMENT = 256 * 1024
@@ -40,28 +42,35 @@ export type UploadErrorCode =
   | 'storage_not_connected'
   | 'storage_not_configured'
   | 'storage_unavailable'
+  | 'storage_full'
+  | 'storage_reauth_required'
 
 export class UploadServiceError extends Error {
   readonly code: UploadErrorCode
   readonly receivedBytes?: number
+  readonly required?: number
+  readonly largestAvailable?: number
 
-  constructor(code: UploadErrorCode, options?: { receivedBytes?: number; cause?: unknown }) {
+  constructor(code: UploadErrorCode, options?: { receivedBytes?: number; required?: number; largestAvailable?: number; cause?: unknown }) {
     super(code, { cause: options?.cause })
     this.name = 'UploadServiceError'
     this.code = code
     if (options?.receivedBytes !== undefined) this.receivedBytes = options.receivedBytes
+    if (options?.required !== undefined) this.required = options.required
+    if (options?.largestAvailable !== undefined) this.largestAvailable = options.largestAvailable
   }
 }
 
 export interface UploadDriveClient {
-  createFolder(name: string, parentId: string): Promise<string>
-  trash(id: string): Promise<void>
-  authorizedFetch(input: string, init?: RequestInit): Promise<Response>
+  createFolder(name: string, parentId: string, accountId?: number): Promise<string>
+  trash(id: string, accountId?: number): Promise<void>
+  authorizedFetch(input: string, init?: RequestInit, accountId?: number): Promise<Response>
 }
 
 export type FixedLengthStreamFactory = (length: number) => TransformStream<Uint8Array, Uint8Array>
 
 export interface UploadServiceDeps {
+  env: AuthEnv
   authRepository: AuthRepository
   fileRepository: FileRepository
   uploadRepository: UploadRepository
@@ -112,6 +121,9 @@ export function createUploadService(deps: UploadServiceDeps) {
       }
       if (error.message === 'storage_not_configured') {
         return new UploadServiceError('storage_not_configured', { cause: error })
+      }
+      if (error.message === 'storage_reauth_required') {
+        return new UploadServiceError('storage_reauth_required', { cause: error })
       }
     }
     return new UploadServiceError('storage_unavailable', { cause: error })
@@ -172,6 +184,20 @@ export function createUploadService(deps: UploadServiceDeps) {
       mimeType = valid ? rawMime : 'application/octet-stream'
     }
 
+    let account: StorageAccount
+    try {
+      account = await selectStorageAccount(deps.env, deps.storageRepository, deps.fetchImpl, size, now)
+    } catch (error) {
+      if (error instanceof StorageFullError) {
+        throw new UploadServiceError('storage_full', {
+          required: error.required,
+          largestAvailable: error.largestAvailable,
+          cause: error,
+        })
+      }
+      throw storageError(error)
+    }
+
     const fileId = crypto.randomUUID()
     const createdAt = now().toISOString()
 
@@ -185,6 +211,7 @@ export function createUploadService(deps: UploadServiceDeps) {
         objectKey: null,
         sizeBytes: size,
         mimeType,
+        storageAccountId: account.id,
         createdAt,
         updatedAt: createdAt,
       })
@@ -195,12 +222,11 @@ export function createUploadService(deps: UploadServiceDeps) {
 
     let folderId: string
     try {
-      folderId = await ensureDriveFolder(
+      folderId = await ensureUserFolder(
         deps.driveClient,
         deps.storageRepository,
-        deps.uploadRepository,
+        account.id,
         user.id,
-        parentId,
       )
     } catch (error) {
       await markFailed(user.id, fileId, createdAt)
@@ -217,7 +243,7 @@ export function createUploadService(deps: UploadServiceDeps) {
           'X-Upload-Content-Length': String(size),
         },
         body: JSON.stringify({ name, parents: [folderId] }),
-      })
+      }, account.id)
       if (!response.ok) throw new BlobStoreError('unavailable', 'google_drive_resume_create_failed')
       sessionUri = response.headers.get('Location') ?? ''
       if (!sessionUri) throw new BlobStoreError('unavailable', 'google_drive_resume_location_missing')

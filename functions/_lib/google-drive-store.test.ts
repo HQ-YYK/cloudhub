@@ -7,8 +7,20 @@ import type { StorageRepository } from './storage-repository.ts'
 
 const emptyRepository: StorageRepository = {
   getAccount: async () => null,
-  upsertAccount: async () => undefined,
+  listAccounts: async () => [],
+  listAccountsWithStats: async () => [],
+  countAccounts: async () => 0,
+  findAccountByEmail: async () => null,
+  createAccount: async () => { throw new Error('not_implemented') },
+  updateAccountTokens: async () => null,
+  setAccountStatus: async () => null,
+  setAccountReauth: async () => undefined,
+  setAccountQuota: async () => undefined,
   deleteAccount: async () => undefined,
+  countFilesByAccount: async () => 0,
+  pendingBytesByAccount: async () => 0,
+  findUserFolder: async () => null,
+  setUserFolderIfEmpty: async () => false,
   deleteExpiredOAuthStates: async () => undefined,
   createOAuthState: async () => undefined,
   consumeOAuthState: async () => null,
@@ -34,11 +46,15 @@ test('GoogleDriveStore maps trashed and missing objects to not_found', async () 
       refresh_token_iv: account.iv,
       root_folder_id: 'root',
       connected_by: 'admin',
+      status: 'active',
+      quota_total: null,
+      quota_used: null,
+      quota_checked_at: null,
       created_at: '2026-01-01T00:00:00.000Z',
       updated_at: '2026-01-01T00:00:00.000Z',
     }),
   }
-  const store = new GoogleDriveStore(env, repository, async (input, init) => {
+  const store = new GoogleDriveStore(env, repository, 1, async (input, init) => {
     if (String(input).includes('oauth2.googleapis.com/token')) {
       return new Response(JSON.stringify({ access_token: 'access', expires_in: 3600 }), { headers: { 'Content-Type': 'application/json' } })
     }
@@ -68,6 +84,10 @@ test('GoogleDriveStore get streams, delete trashes, and put rejects', async () =
       refresh_token_iv: encrypted.iv,
       root_folder_id: 'root',
       connected_by: 'admin',
+      status: 'active',
+      quota_total: null,
+      quota_used: null,
+      quota_checked_at: null,
       created_at: '2026-01-01T00:00:00.000Z',
       updated_at: '2026-01-01T00:00:00.000Z',
     }),
@@ -76,6 +96,7 @@ test('GoogleDriveStore get streams, delete trashes, and put rejects', async () =
   const store = new GoogleDriveStore(
     { GOOGLE_CLIENT_ID: 'client', GOOGLE_CLIENT_SECRET: 'secret', STORAGE_ENCRYPTION_KEY: key },
     repository,
+    1,
     async (input, init) => {
       if (String(input).includes('oauth2.googleapis.com/token')) {
         return new Response(JSON.stringify({ access_token: 'access', expires_in: 3600 }), { headers: { 'Content-Type': 'application/json' } })
@@ -113,6 +134,10 @@ test('GoogleDriveStore refreshes token and retries once after 401', async () => 
       refresh_token_iv: encrypted.iv,
       root_folder_id: 'root',
       connected_by: 'admin',
+      status: 'active',
+      quota_total: null,
+      quota_used: null,
+      quota_checked_at: null,
       created_at: '2026-01-01T00:00:00.000Z',
       updated_at: '2026-01-01T00:00:00.000Z',
     }),
@@ -122,6 +147,7 @@ test('GoogleDriveStore refreshes token and retries once after 401', async () => 
   const store = new GoogleDriveStore(
     { GOOGLE_CLIENT_ID: 'client', GOOGLE_CLIENT_SECRET: 'secret', STORAGE_ENCRYPTION_KEY: key },
     repository,
+    1,
     async (input) => {
       if (String(input).includes('oauth2.googleapis.com/token')) {
         tokenCalls += 1

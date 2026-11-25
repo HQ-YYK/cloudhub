@@ -4,6 +4,7 @@ import { createD1StorageRepository } from '../../_lib/d1-storage-repository.ts'
 import { clearAccessTokenCache } from '../../_lib/google-oauth.ts'
 import { encryptSecret } from '../../_lib/secret-box.ts'
 import { sha256 } from '../../_lib/auth.ts'
+import { MAX_STORAGE_ACCOUNTS, type StorageRepository } from '../../_lib/storage-repository.ts'
 
 function redirect(location: string) {
   return new Response(null, { status: 302, headers: { Location: location } })
@@ -16,9 +17,9 @@ function base64UrlDecode(value: string) {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0))
 }
 
-function failed(reason: string, detail?: string) {
-  console.error('Storage callback failed', reason, detail ?? '')
-  return redirect(`/?storage=failed&reason=${encodeURIComponent(reason)}`)
+function failed(code: string, detail?: string) {
+  console.error('Storage callback failed', code, detail ?? '')
+  return redirect(`/?module=admin-storage&storage_error=${encodeURIComponent(code)}`)
 }
 
 async function googleErrorCode(response: Response) {
@@ -42,7 +43,7 @@ function errorPage() {
 
 export function createStorageCallbackHandler(
   overrides: Partial<{
-    createStorageRepository: (env: AuthEnv) => ReturnType<typeof createD1StorageRepository>
+    createStorageRepository: (env: AuthEnv) => StorageRepository
     fetchImpl: typeof fetch
   }> = {},
 ): PagesFunction<AuthEnv> {
@@ -84,7 +85,7 @@ export function createStorageCallbackHandler(
       const admin = await storageRepository.findAdminUserById(oauthState.user_id)
       if (!admin) return failed('not_admin')
 
-      if (url.searchParams.has('error')) return redirect('/?storage=denied')
+      if (url.searchParams.has('error')) return failed('denied')
 
       const code = url.searchParams.get('code')
       if (!code) return failed('missing_code')
@@ -125,58 +126,59 @@ export function createStorageCallbackHandler(
       }
       if (!idPayload.email) return failed('no_email')
 
-      const existing = await storageRepository.getAccount()
-      let rootFolderId: string | null = null
-      if (existing?.root_folder_id) {
-        const existingResponse = await dependencies.fetchImpl(
-          `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(existing.root_folder_id)}?fields=id,trashed`,
-          { headers: { Authorization: `Bearer ${tokenPayload.access_token}` } },
-        )
-        if (existingResponse.ok) {
-          const existingPayload = await existingResponse.json() as { id?: string, trashed?: boolean }
-          if (existingPayload.id === existing.root_folder_id && existingPayload.trashed !== true) {
-            rootFolderId = existing.root_folder_id
-          }
-        }
-      }
-
-      if (!rootFolderId) {
-        const folderResponse = await dependencies.fetchImpl('https://www.googleapis.com/drive/v3/files', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${tokenPayload.access_token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            name: 'CloudHub',
-            mimeType: 'application/vnd.google-apps.folder',
-          }),
-        })
-        if (!folderResponse.ok) {
-          return failed('drive_folder', `${folderResponse.status} ${await googleErrorCode(folderResponse)}`)
-        }
-        const folderPayload = await folderResponse.json() as { id?: string }
-        if (!folderPayload.id) return failed('drive_folder_no_id')
-        rootFolderId = folderPayload.id
-      }
-
       const encrypted = await encryptSecret(
         tokenPayload.refresh_token,
         context.env.STORAGE_ENCRYPTION_KEY,
       )
       const now = new Date().toISOString()
-      await storageRepository.upsertAccount({
-        id: 1,
-        google_email: idPayload.email,
-        refresh_token_ciphertext: encrypted.ciphertext,
-        refresh_token_iv: encrypted.iv,
-        root_folder_id: rootFolderId,
-        connected_by: oauthState.user_id,
-        created_at: existing?.created_at ?? now,
-        updated_at: now,
+
+      const existing = await storageRepository.findAccountByEmail(idPayload.email)
+      if (existing) {
+        const status = existing.status === 'reauth' ? 'active' : existing.status
+        await storageRepository.updateAccountTokens(
+          existing.id,
+          idPayload.email,
+          encrypted.ciphertext,
+          encrypted.iv,
+          oauthState.user_id,
+          status,
+          now,
+        )
+        clearAccessTokenCache(existing.id)
+        return redirect('/?module=admin-storage&storage=connected')
+      }
+
+      if ((await storageRepository.countAccounts()) >= MAX_STORAGE_ACCOUNTS) {
+        return failed('too_many_accounts')
+      }
+
+      const folderResponse = await dependencies.fetchImpl('https://www.googleapis.com/drive/v3/files', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${tokenPayload.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: 'CloudHub',
+          mimeType: 'application/vnd.google-apps.folder',
+        }),
       })
-      clearAccessTokenCache()
-      return redirect('/?storage=connected')
+      if (!folderResponse.ok) {
+        return failed('drive_folder', `${folderResponse.status} ${await googleErrorCode(folderResponse)}`)
+      }
+      const folderPayload = await folderResponse.json() as { id?: string }
+      if (!folderPayload.id) return failed('drive_folder_no_id')
+
+      await storageRepository.createAccount({
+        googleEmail: idPayload.email,
+        refreshTokenCiphertext: encrypted.ciphertext,
+        refreshTokenIv: encrypted.iv,
+        rootFolderId: folderPayload.id,
+        connectedBy: oauthState.user_id,
+        createdAt: now,
+        updatedAt: now,
+      })
+      return redirect('/?module=admin-storage&storage=connected')
     } catch (error) {
       return failed('exception', error instanceof Error ? error.name : 'unknown_error')
     }

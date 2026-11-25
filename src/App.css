@@ -340,3 +340,23 @@
 .recovery-code-save input { width: 16px; height: 16px; }
 .subtle-link { padding: 0; color: #a6afc0; background: transparent; border: 0; font-size: 12px; }
 .subtle-link:hover { color: var(--blue); }
+
+.admin-storage { max-width: 980px; }
+.admin-storage-toolbar-actions { display: flex; align-items: center; gap: 8px; }
+.admin-storage-alert { margin: 0 0 14px; padding: 11px 14px; border-radius: 8px; font-size: 13px; line-height: 1.6; }
+.admin-storage-alert.is-danger { color: #a24b58; background: #fff0f1; border: 1px solid #f5d5d9; }
+.admin-storage-alert.is-success { color: #2f6b4f; background: #ecf7f1; border: 1px solid #cfe8db; }
+.admin-storage-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.admin-storage-stat { display: grid; gap: 6px; padding: 16px 18px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
+.admin-storage-stat-label { color: #66738a; font-size: 11px; }
+.admin-storage-stat-value { color: var(--ink); font-size: 22px; font-weight: 750; letter-spacing: -.5px; }
+.admin-storage-table { min-width: 900px; }
+.admin-storage-status { display: inline-flex; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+.admin-storage-status.is-active { color: #2f6b4f; background: #ecf7f1; }
+.admin-storage-status.is-readonly { color: #5d6b83; background: #eef1f6; }
+.admin-storage-status.is-reauth { color: #a24b58; background: #fff0f1; }
+.admin-storage-quota { display: grid; gap: 6px; color: #5d6b83; font-size: 11px; }
+.admin-storage-progress { display: block; height: 6px; overflow: hidden; background: #edf2ff; border-radius: 3px; }
+.admin-storage-progress span { display: block; height: 100%; background: var(--blue); border-radius: 3px; }
+.admin-storage-row-warning { margin: 6px 0 0; color: #9a6a00; font-size: 11px; line-height: 1.5; }
+.admin-storage-row-warning.is-danger { color: #c64f5c; }
