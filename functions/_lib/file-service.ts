@@ -9,6 +9,7 @@ import {
   FileRepositoryConflictError,
   type FileRecord,
   type FileRepository,
+  type FolderDeleteRepository,
 } from './file-repository.ts'
 
 export const FILE_NAME_MAX_LENGTH = 255
@@ -28,6 +29,8 @@ export class FileServiceError extends Error {
     | 'delete_failed'
     | 'conflict'
     | 'password_change_required'
+    | 'folder_too_large'
+    | 'folder_busy'
 
   constructor(code: FileServiceError['code'], options?: ErrorOptions) {
     super(code, options)
@@ -138,20 +141,14 @@ export async function transitionFileStorage(
   return updated
 }
 
-export async function deleteFile(
-  authRepository: AuthRepository,
+async function deleteFileCore(
   fileRepository: FileRepository,
   createBlobStore: () => BlobStore,
-  request: Request,
+  userId: string,
   fileId: string,
-  now = new Date().toISOString(),
+  now: string,
 ) {
-  const user = await getAuthenticatedUser(authRepository, request)
-  if (!user) throw new FileServiceError('unauthorized')
-  if (user.mustChangePassword) throw new FileServiceError('password_change_required')
-  validateFileId(fileId)
-
-  const record = await fileRepository.findFile(user.id, fileId)
+  const record = await fileRepository.findFile(userId, fileId)
   if (!record || record.kind !== 'file' || record.deleted_at !== null) {
     throw new FileServiceError('resource_not_found')
   }
@@ -166,7 +163,7 @@ export async function deleteFile(
   }
 
   const deleting = await fileRepository.updateFileStorageStatus(
-    user.id,
+    userId,
     fileId,
     record.storage_status,
     'deleting',
@@ -180,7 +177,7 @@ export async function deleteFile(
   } catch (error) {
     if (!(error instanceof BlobStoreError && error.code === 'not_found')) {
       try {
-        await fileRepository.updateFileStorageStatus(user.id, fileId, 'deleting', 'failed', now)
+        await fileRepository.updateFileStorageStatus(userId, fileId, 'deleting', 'failed', now)
       } catch {
         // Keep deleting when the recovery transition is uncertain.
       }
@@ -189,13 +186,58 @@ export async function deleteFile(
   }
 
   try {
-    const deleted = await fileRepository.softDeleteFile(user.id, fileId, now, now)
+    const deleted = await fileRepository.softDeleteFile(userId, fileId, now, now)
     if (!deleted) throw new FileServiceError('delete_failed')
     return deleted
   } catch (error) {
     if (error instanceof FileServiceError) throw error
     throw new FileServiceError('delete_failed', { cause: error })
   }
+}
+
+export async function deleteFile(
+  authRepository: AuthRepository,
+  fileRepository: FileRepository,
+  createBlobStore: () => BlobStore,
+  request: Request,
+  fileId: string,
+  now = new Date().toISOString(),
+) {
+  const user = await getAuthenticatedUser(authRepository, request)
+  if (!user) throw new FileServiceError('unauthorized')
+  if (user.mustChangePassword) throw new FileServiceError('password_change_required')
+  validateFileId(fileId)
+  return deleteFileCore(fileRepository, createBlobStore, user.id, fileId, now)
+}
+
+const FOLDER_DELETE_LIMIT = 5000
+
+export async function deleteItem(
+  authRepository: AuthRepository,
+  fileRepository: FileRepository & FolderDeleteRepository,
+  createBlobStore: () => BlobStore,
+  request: Request,
+  fileId: string,
+  now = new Date().toISOString(),
+): Promise<{ deleted: true, count?: number }> {
+  const user = await getAuthenticatedUser(authRepository, request)
+  if (!user) throw new FileServiceError('unauthorized')
+  if (user.mustChangePassword) throw new FileServiceError('password_change_required')
+  validateFileId(fileId)
+
+  const directory = await fileRepository.findDirectory(user.id, fileId)
+  if (!directory) {
+    await deleteFileCore(fileRepository, createBlobStore, user.id, fileId, now)
+    return { deleted: true }
+  }
+
+  const descendants = await fileRepository.countFolderDescendants(user.id, fileId)
+  if (descendants > FOLDER_DELETE_LIMIT) throw new FileServiceError('folder_too_large')
+  if (await fileRepository.hasPendingDescendant(user.id, fileId)) throw new FileServiceError('folder_busy')
+
+  const count = await fileRepository.softDeleteFolderTree(user.id, fileId, now, now)
+  if (count === 0) throw new FileServiceError('resource_not_found')
+  return { deleted: true, count }
 }
 
 export function publicFileRecord(

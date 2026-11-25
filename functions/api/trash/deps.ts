@@ -1,9 +1,10 @@
 import { createD1AuthRepository } from '../../_lib/d1-auth-repository.ts'
 import { createD1FileRepository } from '../../_lib/d1-file-repository.ts'
+import { createD1FileTreeRepository } from '../../_lib/d1-file-tree-repository.ts'
 import { createD1StorageRepository } from '../../_lib/d1-storage-repository.ts'
 import type { AuthRepository } from '../../_lib/auth-repository.ts'
 import type { AuthEnv } from '../../_lib/cloudflare-env.ts'
-import type { TrashRepository } from '../../_lib/file-repository.ts'
+import type { TrashRepository, TrashTreeRepository } from '../../_lib/file-repository.ts'
 import { GoogleDriveClient } from '../../_lib/google-drive-client.ts'
 import { jsonResponse } from '../../_lib/http.ts'
 import type { StorageRepository } from '../../_lib/storage-repository.ts'
@@ -15,7 +16,7 @@ import {
 
 export interface TrashDependencies {
   createAuthRepository: (env: AuthEnv) => AuthRepository
-  createTrashRepository: (env: AuthEnv) => TrashRepository
+  createTrashRepository: (env: AuthEnv) => TrashRepository & TrashTreeRepository
   createStorageRepository: (env: AuthEnv) => StorageRepository
   createDriveClient: (env: AuthEnv, storageRepository: StorageRepository, fetchImpl: typeof fetch) => TrashDriveClient
   fetchImpl: typeof fetch
@@ -29,7 +30,10 @@ export const defaultTrashDependencies: TrashDependencies = {
   },
   createTrashRepository: (env) => {
     if (!env.DB) throw new Error('database_configuration_missing')
-    return createD1FileRepository(env.DB)
+    return {
+      ...createD1FileRepository(env.DB),
+      ...createD1FileTreeRepository(env.DB),
+    }
   },
   createStorageRepository: (env) => {
     if (!env.DB) throw new Error('database_configuration_missing')

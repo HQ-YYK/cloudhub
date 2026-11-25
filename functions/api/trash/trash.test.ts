@@ -9,6 +9,7 @@ import {
   type FileRecord,
   type TrashItem,
   type TrashRepository,
+  type TrashTreeRepository,
 } from '../../_lib/file-repository.ts'
 import type { StorageRepository } from '../../_lib/storage-repository.ts'
 import type { TrashDriveClient } from '../../_lib/trash-service.ts'
@@ -103,28 +104,38 @@ function makeTrashRepository(initial: FileRecord[] = []) {
       updated_at: record.updated_at,
       deleted_at: record.deleted_at!,
       parent_name: parent?.name ?? null,
+      item_count: record.kind === 'directory'
+        ? records.filter((candidate) => candidate.owner_id === record.owner_id
+          && candidate.deleted_at === record.deleted_at
+          && candidate.id !== record.id).length
+        : null,
     }
   }
 
-  function matches(record: FileRecord, ownerId: string, cutoff: string) {
-    const deletedAt = record.deleted_at
-    if (deletedAt === null) return false
+  function isTrashed(record: FileRecord, ownerId: string, cutoff: string) {
     return record.owner_id === ownerId
-      && record.kind === 'file'
+      && record.deleted_at !== null
       && (record.purged_at === null || record.purged_at === undefined)
-      && deletedAt > cutoff
+      && record.deleted_at > cutoff
   }
 
-  const repository: TrashRepository = {
+  function topLevel(record: FileRecord) {
+    if (record.parent_id === null) return true
+    const parent = records.find((candidate) => candidate.id === record.parent_id && candidate.owner_id === record.owner_id)
+    if (!parent) return true
+    return parent.deleted_at === null || parent.deleted_at !== record.deleted_at
+  }
+
+  const repository: TrashRepository & TrashTreeRepository = {
     async listTrash(ownerId, cutoff) {
       return records
-        .filter((record) => matches(record, ownerId, cutoff))
+        .filter((record) => isTrashed(record, ownerId, cutoff) && topLevel(record))
         .sort((a, b) => (a.deleted_at! < b.deleted_at! ? 1 : -1))
         .slice(0, 500)
         .map(toItem)
     },
     async findTrashFile(ownerId, id, cutoff) {
-      const record = records.find((candidate) => candidate.id === id && matches(candidate, ownerId, cutoff))
+      const record = records.find((candidate) => candidate.id === id && isTrashed(candidate, ownerId, cutoff))
       return record ? toItem(record) : null
     },
     async hasActiveNameConflict(ownerId, parentId, nameKey) {
@@ -139,6 +150,7 @@ function makeTrashRepository(initial: FileRecord[] = []) {
       const record = records.find(
         (candidate) => candidate.id === id
           && candidate.owner_id === ownerId
+          && candidate.kind === 'file'
           && candidate.deleted_at !== null
           && (candidate.purged_at === null || candidate.purged_at === undefined),
       )
@@ -156,32 +168,141 @@ function makeTrashRepository(initial: FileRecord[] = []) {
       record.updated_at = updatedAt
       return record
     },
+    async findActiveDirectory(ownerId, id) {
+      const record = records.find(
+        (candidate) => candidate.id === id
+          && candidate.owner_id === ownerId
+          && candidate.kind === 'directory'
+          && candidate.deleted_at === null,
+      )
+      return record ? { id: record.id } : null
+    },
+    async restoreFolderTree(ownerId, id, deletedAt, targetParentId, updatedAt) {
+      const folder = records.find(
+        (candidate) => candidate.id === id
+          && candidate.owner_id === ownerId
+          && candidate.kind === 'directory'
+          && candidate.deleted_at === deletedAt,
+      )
+      if (!folder) return null
+      for (const record of records) {
+        if (record.owner_id !== ownerId || record.deleted_at !== deletedAt) continue
+        if (record.kind === 'file' && record.storage_status === 'deleting') continue
+        record.deleted_at = null
+        record.updated_at = updatedAt
+      }
+      folder.parent_id = targetParentId
+      return folder
+    },
     async deleteTrashedFile(ownerId, id) {
       const index = records.findIndex(
-        (candidate) => candidate.id === id && candidate.owner_id === ownerId && candidate.deleted_at !== null,
+        (candidate) => candidate.id === id
+          && candidate.owner_id === ownerId
+          && candidate.kind === 'file'
+          && candidate.deleted_at !== null,
       )
       if (index >= 0) records.splice(index, 1)
     },
-    async deleteExpiredTrash(ownerId, cutoff) {
+    async deleteTrashedBatch(ownerId, deletedAt) {
+      for (const record of records) {
+        if (record.owner_id !== ownerId || record.deleted_at === deletedAt) continue
+        const parent = records.find(
+          (candidate) => candidate.owner_id === ownerId
+            && candidate.deleted_at === deletedAt
+            && candidate.id === record.parent_id,
+        )
+        if (parent) record.parent_id = null
+      }
       let removed = 0
       for (let index = records.length - 1; index >= 0; index -= 1) {
         const record = records[index]
-        if (record.owner_id === ownerId && record.kind === 'file' && record.deleted_at !== null && record.deleted_at <= cutoff) {
+        if (record.owner_id === ownerId && record.deleted_at === deletedAt) {
           records.splice(index, 1)
           removed += 1
         }
       }
       return removed
     },
+    async deleteExpiredTrash(ownerId, cutoff) {
+      let removed = 0
+      for (let index = records.length - 1; index >= 0; index -= 1) {
+        const record = records[index]
+        const live = record.kind === 'file' && record.object_key !== null && record.storage_status !== 'deleting'
+        if (record.owner_id === ownerId && record.deleted_at !== null && record.deleted_at <= cutoff && !live) {
+          records.splice(index, 1)
+          removed += 1
+        }
+      }
+      return removed
+    },
+    async listExpiredLiveObjectKeys(ownerId, cutoff, limit) {
+      return records
+        .filter((record) => record.owner_id === ownerId
+          && record.kind === 'file'
+          && record.deleted_at !== null
+          && record.deleted_at <= cutoff
+          && record.storage_status !== 'deleting'
+          && record.object_key !== null)
+        .slice(0, limit)
+        .map((record) => ({ id: record.id, object_key: record.object_key! }))
+    },
     async listTrashObjectKeys(ownerId, cutoff, limit) {
       return records
-        .filter((record) => matches(record, ownerId, cutoff) && record.object_key !== null)
+        .filter((record) => isTrashed(record, ownerId, cutoff) && record.kind === 'file' && record.object_key !== null)
         .sort((a, b) => (a.deleted_at! < b.deleted_at! ? -1 : 1))
         .slice(0, limit)
         .map((record) => ({ id: record.id, object_key: record.object_key! }))
     },
     async countTrash(ownerId, cutoff) {
-      return records.filter((record) => matches(record, ownerId, cutoff)).length
+      return records.filter((record) => isTrashed(record, ownerId, cutoff) && record.kind === 'file').length
+    },
+    async listBatchObjectKeys(ownerId, deletedAt, limit) {
+      return records
+        .filter((record) => record.owner_id === ownerId
+          && record.kind === 'file'
+          && record.deleted_at === deletedAt
+          && (record.purged_at === null || record.purged_at === undefined)
+          && record.object_key !== null)
+        .sort((a, b) => (a.id < b.id ? -1 : 1))
+        .slice(0, limit)
+        .map((record) => ({ id: record.id, object_key: record.object_key! }))
+    },
+    async countBatchFiles(ownerId, deletedAt) {
+      return records.filter((record) => record.owner_id === ownerId
+        && record.kind === 'file'
+        && record.deleted_at === deletedAt
+        && (record.purged_at === null || record.purged_at === undefined)).length
+    },
+    async purgeEmptyTrashFolders(ownerId, cutoff) {
+      const emptyBatches = new Set(
+        records
+          .filter((record) => record.owner_id === ownerId
+            && record.kind === 'directory'
+            && record.deleted_at !== null
+            && (record.purged_at === null || record.purged_at === undefined)
+            && record.deleted_at > cutoff)
+          .filter((directory) => !records.some(
+            (candidate) => candidate.owner_id === ownerId
+              && candidate.kind === 'file'
+              && candidate.deleted_at === directory.deleted_at
+              && (candidate.purged_at === null || candidate.purged_at === undefined),
+          ))
+          .map((directory) => directory.deleted_at!),
+      )
+      for (const record of records) {
+        if (record.owner_id !== ownerId || record.parent_id === null) continue
+        const parent = records.find((candidate) => candidate.owner_id === ownerId && candidate.id === record.parent_id)
+        if (parent && parent.deleted_at !== null && emptyBatches.has(parent.deleted_at)) record.parent_id = null
+      }
+      let removed = 0
+      for (let index = records.length - 1; index >= 0; index -= 1) {
+        const record = records[index]
+        if (record.owner_id === ownerId && record.deleted_at !== null && emptyBatches.has(record.deleted_at)) {
+          records.splice(index, 1)
+          removed += 1
+        }
+      }
+      return removed
     },
   }
   return { repository, records }
@@ -259,6 +380,19 @@ function restoreRequest(id = fileId, origin = 'https://cloudhub.test') {
 
 function trashed(overrides: Partial<FileRecord> = {}) {
   return fileRecord({ deleted_at: '2030-01-10T00:00:00.000Z', ...overrides })
+}
+
+function trashedFolder(overrides: Partial<FileRecord> = {}) {
+  return fileRecord({
+    id: crypto.randomUUID(),
+    kind: 'directory',
+    object_key: null,
+    size_bytes: null,
+    mime_type: null,
+    storage_status: 'ready',
+    deleted_at: '2030-01-10T00:00:00.000Z',
+    ...overrides,
+  })
 }
 
 test('list returns only own, recent, unpurged files with expires_at and parent_name', async () => {
@@ -416,4 +550,137 @@ test('cross-origin writes are rejected before touching storage', async () => {
   assert.equal(restore.status, 403)
   assert.deepEqual(deletedPermanently, [])
   assert.deepEqual(untrashed, [])
+})
+
+test('list shows top-level deleted folders with item_count and hides their children', async () => {
+  const folder = trashedFolder()
+  const child = trashed({ id: crypto.randomUUID(), parent_id: folder.id, name: 'a.txt', name_key: 'a.txt', object_key: 'objects/a', deleted_at: folder.deleted_at })
+  const sibling = trashed({ id: crypto.randomUUID(), parent_id: folder.id, name: 'b.txt', name_key: 'b.txt', object_key: 'objects/b', deleted_at: folder.deleted_at })
+
+  const { overrides } = buildOverrides({ records: [folder, child, sibling] })
+  const response = await run(createTrashHandler(overrides), listRequest())
+
+  assert.equal(response.status, 200)
+  const payload = await response.json() as { items: Array<{ id: string, kind: string, item_count?: number }> }
+  assert.equal(payload.items.length, 1)
+  assert.equal(payload.items[0].id, folder.id)
+  assert.equal(payload.items[0].kind, 'directory')
+  assert.equal(payload.items[0].item_count, 2)
+})
+
+test('restore folder restores the whole same-batch subtree', async () => {
+  const folder = trashedFolder()
+  const child = trashed({ id: crypto.randomUUID(), parent_id: folder.id, name: 'a.txt', name_key: 'a.txt', object_key: 'objects/a', storage_status: 'ready', deleted_at: folder.deleted_at })
+
+  const { overrides, records } = buildOverrides({ records: [folder, child] })
+  const response = await run(createTrashRestoreHandler(overrides), restoreRequest(folder.id), { id: folder.id })
+
+  assert.equal(response.status, 200)
+  const payload = await response.json() as { item: { id: string } }
+  assert.equal(payload.item.id, folder.id)
+  assert.equal(records.every((record) => record.deleted_at === null), true)
+})
+
+test('restore folder moves to root when its parent is already deleted', async () => {
+  const parent = trashedFolder({ deleted_at: '2030-01-05T00:00:00.000Z' })
+  const folder = trashedFolder({ parent_id: parent.id })
+
+  const { overrides, records } = buildOverrides({ records: [parent, folder] })
+  const response = await run(createTrashRestoreHandler(overrides), restoreRequest(folder.id), { id: folder.id })
+
+  assert.equal(response.status, 200)
+  assert.equal(records.find((record) => record.id === folder.id)?.parent_id, null)
+})
+
+test('restore folder returns conflict when the target parent has the same name', async () => {
+  const active = fileRecord({
+    id: crypto.randomUUID(),
+    kind: 'directory',
+    name: 'Docs',
+    name_key: 'docs',
+    object_key: null,
+    size_bytes: null,
+    mime_type: null,
+    storage_status: 'ready',
+  })
+  const folder = trashedFolder({ name: 'Docs', name_key: 'docs' })
+
+  const { overrides, untrashed } = buildOverrides({ records: [active, folder] })
+  const response = await run(createTrashRestoreHandler(overrides), restoreRequest(folder.id), { id: folder.id })
+
+  assert.equal(response.status, 409)
+  assert.deepEqual(await response.json(), { error: 'conflict' })
+  assert.deepEqual(untrashed, [])
+})
+
+test('purge folder deletes Drive files in batches and reports remaining', async () => {
+  const folder = trashedFolder()
+  const files = Array.from({ length: 45 }, (_, index) => fileRecord({
+    id: crypto.randomUUID(),
+    parent_id: folder.id,
+    name: `f-${index}.txt`,
+    name_key: `f-${index}.txt`,
+    object_key: `objects/f-${index}`,
+    deleted_at: folder.deleted_at,
+  }))
+
+  const { overrides, deletedPermanently, records } = buildOverrides({ records: [folder, ...files] })
+  const response = await run(createTrashItemHandler(overrides), purgeRequest(folder.id), { id: folder.id })
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { purged: 40, remaining: 5 })
+  assert.equal(deletedPermanently.length, 40)
+  assert.equal(records.some((record) => record.id === folder.id), true)
+})
+
+test('purge folder removes the D1 subtree once every Drive file is gone', async () => {
+  const folder = trashedFolder()
+  const child = trashed({ id: crypto.randomUUID(), parent_id: folder.id, name: 'a.txt', name_key: 'a.txt', object_key: 'objects/a', deleted_at: folder.deleted_at })
+
+  const { overrides, records } = buildOverrides({ records: [folder, child] })
+  const response = await run(createTrashItemHandler(overrides), purgeRequest(folder.id), { id: folder.id })
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { purged: 1, remaining: 0 })
+  assert.equal(records.some((record) => record.id === folder.id), false)
+  assert.equal(records.some((record) => record.id === child.id), false)
+})
+
+test('clear removes folder rows once their files are purged', async () => {
+  const folder = trashedFolder()
+  const file = trashed({ id: crypto.randomUUID(), parent_id: folder.id, name: 'a.txt', name_key: 'a.txt', object_key: 'objects/a', deleted_at: folder.deleted_at })
+
+  const { overrides, records } = buildOverrides({ records: [folder, file] })
+  const response = await run(createTrashHandler(overrides), clearRequest())
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { purged: 1, remaining: 0 })
+  assert.equal(records.length, 0)
+})
+
+test('list permanently deletes Drive objects of expired files that were trashed with a folder', async () => {
+  const folder = trashedFolder({ deleted_at: '2029-12-01T00:00:00.000Z' })
+  const child = trashed({ id: crypto.randomUUID(), parent_id: folder.id, name: 'a.txt', name_key: 'a.txt', object_key: 'objects/a', storage_status: 'ready', deleted_at: folder.deleted_at })
+  const single = trashed({ id: crypto.randomUUID(), name: 'b.txt', name_key: 'b.txt', object_key: 'objects/b', storage_status: 'deleting', deleted_at: '2029-12-01T00:00:00.000Z' })
+
+  const { overrides, records, deletedPermanently } = buildOverrides({ records: [folder, child, single] })
+  const response = await run(createTrashHandler(overrides), listRequest())
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(deletedPermanently, ['objects/a'])
+  assert.equal(records.length, 0)
+})
+
+test('restore folder keeps failed files failed and leaves Drive-trashed files in the trash', async () => {
+  const folder = trashedFolder()
+  const failed = trashed({ id: crypto.randomUUID(), parent_id: folder.id, name: 'f.txt', name_key: 'f.txt', object_key: 'objects/f', storage_status: 'failed', deleted_at: folder.deleted_at })
+  const single = trashed({ id: crypto.randomUUID(), name: 's.txt', name_key: 's.txt', object_key: 'objects/s', storage_status: 'deleting', deleted_at: folder.deleted_at })
+
+  const { overrides, records } = buildOverrides({ records: [folder, failed, single] })
+  const response = await run(createTrashRestoreHandler(overrides), restoreRequest(folder.id), { id: folder.id })
+
+  assert.equal(response.status, 200)
+  assert.equal(records.find((record) => record.id === failed.id)?.storage_status, 'failed')
+  assert.equal(records.find((record) => record.id === failed.id)?.deleted_at, null)
+  assert.notEqual(records.find((record) => record.id === single.id)?.deleted_at, null)
 })
