@@ -1,18 +1,25 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
+  AuthRequestError,
   getCurrentUser,
+  getKeys,
   login as loginRequest,
   logout as logoutRequest,
   verifyTotp as verifyTotpRequest,
   type AuthUser,
+  type LoginCredential,
   type TotpCredential,
-} from '../api/auth'
-import { AuthContext, type AuthStatus } from './auth-context'
+} from '../api/auth.ts'
+import { unwrapMasterKey } from '../crypto/index.ts'
+import { credentialFor, type AccountCredential, type AuthKeyCredential } from './credential.ts'
+import { AuthContext, type AuthStatus } from './auth-context.ts'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading')
   const [user, setUser] = useState<AuthUser | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [masterKey, setMasterKeyState] = useState<Uint8Array<ArrayBuffer> | null>(null)
+  const [pendingCredential, setPendingCredential] = useState<AccountCredential | null>(null)
 
   useEffect(() => {
     let active = true
@@ -32,13 +39,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const finishLogin = useCallback(async (authenticatedUser: AuthUser, credential: AccountCredential) => {
+    if (authenticatedUser.legacy || !authenticatedUser.keysReady || authenticatedUser.mustChangePassword) {
+      setPendingCredential(credential)
+      setUser(authenticatedUser)
+      setStatus('authenticated')
+      return
+    }
+    const keyCredential = credential as AuthKeyCredential
+    const keys = await getKeys()
+    if (!keys.wrappedMasterKey) throw new AuthRequestError(500, 'invalid_response')
+    const mk = await unwrapMasterKey(keys.wrappedMasterKey, keyCredential.wrapKey, authenticatedUser.id)
+    setMasterKeyState(mk)
+    setPendingCredential(null)
+    setUser(authenticatedUser)
+    setStatus('authenticated')
+  }, [])
+
   const login = useCallback(async (username: string, password: string) => {
     setError(null)
     try {
-      const result = await loginRequest(username, password)
-      if ('totpRequired' in result) return result.challenge
-      setUser(result.user)
-      setStatus('authenticated')
+      const credential = await credentialFor(username.trim(), password)
+      const loginCredential: LoginCredential = 'password' in credential
+        ? { username: username.trim(), password: credential.password }
+        : { username: username.trim(), authKey: credential.authKey }
+      const result = await loginRequest(loginCredential)
+      if ('totpRequired' in result) {
+        setPendingCredential(credential)
+        return result.challenge
+      }
+      await finishLogin(result.user, credential)
       return null
     } catch (requestError) {
       if (requestError instanceof Error && 'status' in requestError) {
@@ -49,15 +79,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       throw new Error('登录服务暂时不可用，请稍后重试。', { cause: requestError })
     }
-  }, [])
+  }, [finishLogin])
 
   const verifyTotp = useCallback(async (challenge: string, credential: TotpCredential) => {
     setError(null)
     try {
       const authenticatedUser = await verifyTotpRequest(challenge, credential)
-      setUser(authenticatedUser)
-      setStatus('authenticated')
+      const pending = pendingCredential
+      if (!pending) throw new Error('登录状态已过期，请重新登录。')
+      await finishLogin(authenticatedUser, pending)
     } catch (requestError) {
+      if (requestError instanceof Error && requestError.message === '登录状态已过期，请重新登录。') {
+        throw requestError
+      }
       if (requestError instanceof Error && 'status' in requestError) {
         const status = (requestError as { status: number }).status
         if (status === 401) throw new Error('验证码不正确或已过期，多次失败请返回重新登录。', { cause: requestError })
@@ -66,13 +100,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       throw new Error('登录服务暂时不可用，请稍后重试。', { cause: requestError })
     }
-  }, [])
+  }, [finishLogin, pendingCredential])
 
   const logout = useCallback(async () => {
     setError(null)
-    await logoutRequest()
-    setUser(null)
-    setStatus('anonymous')
+    setMasterKeyState(null)
+    setPendingCredential(null)
+    try {
+      await logoutRequest()
+    } finally {
+      setUser(null)
+      setStatus('anonymous')
+    }
+  }, [])
+
+  const setMasterKey = useCallback((mk: Uint8Array<ArrayBuffer> | null) => setMasterKeyState(mk), [])
+  const completeKeySetup = useCallback((mk: Uint8Array<ArrayBuffer>) => {
+    setMasterKeyState(mk)
+    setPendingCredential(null)
+    setUser((current) => current ? { ...current, legacy: false, keysReady: true, mustChangePassword: false } : current)
   }, [])
 
   const clearError = useCallback(() => setError(null), [])
@@ -82,9 +128,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const totpChanged = useCallback((enabled: boolean) => {
     setUser((current) => current ? { ...current, totpEnabled: enabled } : current)
   }, [])
+
   const value = useMemo(
-    () => ({ status, user, error, login, verifyTotp, logout, clearError, passwordChanged, totpChanged }),
-    [status, user, error, login, verifyTotp, logout, clearError, passwordChanged, totpChanged],
+    () => ({
+      status,
+      user,
+      error,
+      masterKey,
+      pendingCredential,
+      login,
+      verifyTotp,
+      logout,
+      setMasterKey,
+      completeKeySetup,
+      passwordChanged,
+      totpChanged,
+      clearError,
+    }),
+    [status, user, error, masterKey, pendingCredential, login, verifyTotp, logout, setMasterKey, completeKeySetup, passwordChanged, totpChanged, clearError],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

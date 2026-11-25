@@ -137,7 +137,7 @@ export default function LoginPage() {
           </label>
           {(error || sessionError) && <p className="form-error" role="alert">{error || sessionError}</p>}
           <button className="login-submit" type="submit" disabled={submitting}>
-            {submitting ? '正在登录…' : '登录 CloudHub'}
+            {submitting ? '正在计算密钥…' : '登录 CloudHub'}
           </button>
         </form>
         <p className="auth-note">仅限已配置的 CloudHub 账号使用</p>
