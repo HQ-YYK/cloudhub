@@ -2,6 +2,7 @@ import type { AuthRepository, LoginAttempt, NewSession } from './auth-repository
 
 export const PASSWORD_ITERATIONS = 100000
 export const MAX_PBKDF2_ITERATIONS = 100000
+export const MIN_INITIAL_PASSWORD_LENGTH = 4
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000
 export const MAX_LOGIN_FAILURES = 5
 export const LOGIN_WINDOW_MS = 15 * 60 * 1000
