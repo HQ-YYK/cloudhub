@@ -4,6 +4,8 @@ export type AuthUser = {
   role: 'admin' | 'user'
   mustChangePassword: boolean
   totpEnabled?: boolean
+  legacy: boolean
+  keysReady: boolean
 }
 
 type AuthResponse = {
@@ -16,6 +18,42 @@ export type LoginResult =
   | { totpRequired: true; challenge: string }
 
 export type TotpCredential = { code: string } | { recoveryCode: string }
+
+export type LoginCredential =
+  | { username: string; password: string }
+  | { username: string; authKey: string }
+
+export type PreloginResult =
+  | { legacy: true }
+  | { legacy: false; kdfSalt: string; kdfIterations: number }
+
+export type KeysResponse = {
+  legacy: boolean
+  kdfSalt: string | null
+  kdfIterations: number | null
+  wrappedMasterKey: string | null
+  recoveryWrappedKey: string | null
+  error?: string
+}
+
+export type PasswordChangeBody = {
+  currentAuthKey?: string
+  currentPassword?: string
+  newKdfSalt: string
+  newAuthKey: string
+  wrappedMasterKey: string
+  recoveryWrappedKey?: string
+}
+
+export type ResetKeysBody = {
+  currentAuthKey: string
+  newKdfSalt: string
+  newAuthKey: string
+  wrappedMasterKey: string
+  recoveryWrappedKey: string
+}
+
+export type DisableTotpCredential = { authKey: string } | { password: string }
 
 export class AuthRequestError extends Error {
   readonly status: number
@@ -65,10 +103,22 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
   }
 }
 
-export async function login(username: string, password: string): Promise<LoginResult> {
+export async function prelogin(username: string): Promise<PreloginResult> {
+  const payload = await requestAuth<{ legacy?: boolean; kdfSalt?: string | null; kdfIterations?: number | null; error?: string }>('/api/auth/prelogin', {
+    method: 'POST',
+    body: JSON.stringify({ username }),
+  })
+  if (payload.legacy === true) return { legacy: true }
+  if (typeof payload.kdfSalt === 'string' && typeof payload.kdfIterations === 'number') {
+    return { legacy: false, kdfSalt: payload.kdfSalt, kdfIterations: payload.kdfIterations }
+  }
+  throw new AuthRequestError(500, 'invalid_response')
+}
+
+export async function login(credential: LoginCredential): Promise<LoginResult> {
   const payload = await requestAuth<AuthResponse & { totpRequired?: boolean; challenge?: string }>('/api/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify(credential),
   })
   if (payload.totpRequired && typeof payload.challenge === 'string') {
     return { totpRequired: true, challenge: payload.challenge }
@@ -105,10 +155,10 @@ export async function enableTotp(code: string): Promise<string[]> {
   return payload.recoveryCodes
 }
 
-export async function disableTotp(password: string, code: string): Promise<void> {
+export async function disableTotp(credential: DisableTotpCredential, code: string): Promise<void> {
   await requestAuth('/api/auth/totp/disable', {
     method: 'POST',
-    body: JSON.stringify({ password, code }),
+    body: JSON.stringify({ ...credential, code }),
   })
 }
 
@@ -116,9 +166,29 @@ export async function logout(): Promise<void> {
   await requestAuth('/api/auth/logout', { method: 'POST' })
 }
 
-export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+export async function getKeys(): Promise<KeysResponse> {
+  const payload = await requestAuth<KeysResponse>('/api/auth/keys')
+  if (typeof payload.legacy !== 'boolean') throw new AuthRequestError(500, 'invalid_response')
+  return payload
+}
+
+export async function changePassword(body: PasswordChangeBody): Promise<void> {
   await requestAuth('/api/auth/password', {
     method: 'POST',
-    body: JSON.stringify({ currentPassword, newPassword }),
+    body: JSON.stringify(body),
+  })
+}
+
+export async function regenerateRecoveryKey(body: { currentAuthKey: string; recoveryWrappedKey: string }): Promise<void> {
+  await requestAuth('/api/auth/keys/recovery', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function resetKeys(body: ResetKeysBody): Promise<void> {
+  await requestAuth('/api/auth/keys/reset', {
+    method: 'POST',
+    body: JSON.stringify(body),
   })
 }

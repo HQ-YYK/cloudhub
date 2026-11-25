@@ -19,8 +19,21 @@ function mockFetch(response, capture) {
   }
 }
 
+function adminUser(overrides = {}) {
+  return {
+    id: '1',
+    username: 'demo1',
+    role: 'user',
+    disabled: 0,
+    must_change_password: 1,
+    created_at: '2026-01-01',
+    updated_at: '2026-01-01',
+    ...overrides,
+  }
+}
+
 test('listUsers returns the users array', async () => {
-  const users = [{ id: '1', username: 'demo1', role: 'user', disabled: 0, must_change_password: 1, created_at: '2026-01-01', updated_at: '2026-01-01' }]
+  const users = [adminUser()]
   let request
   const restore = mockFetch(
     new Response(JSON.stringify({ users }), { headers: { 'Content-Type': 'application/json' } }),
@@ -34,28 +47,26 @@ test('listUsers returns the users array', async () => {
   }
 })
 
-test('createUser posts username and password', async () => {
-  const user = { id: '1', username: 'demo1', role: 'user', disabled: 0, must_change_password: 1, created_at: '2026-01-01', updated_at: '2026-01-01' }
+test('createUser posts username, kdfSalt and authKey', async () => {
   let request
   const restore = mockFetch(
-    new Response(JSON.stringify({ user }), { status: 201, headers: { 'Content-Type': 'application/json' } }),
+    new Response(JSON.stringify({ user: adminUser() }), { status: 201, headers: { 'Content-Type': 'application/json' } }),
     (input, init) => { request = { input, init } },
   )
   try {
-    assert.deepEqual(await createUser('demo1', 'temporary-password'), user)
+    assert.deepEqual(await createUser('demo1', 'salt-b64', 'auth-key-b64'), adminUser())
     assert.equal(request.input, '/api/admin/users')
     assert.equal(request.init.method, 'POST')
-    assert.deepEqual(JSON.parse(request.init.body), { username: 'demo1', password: 'temporary-password' })
+    assert.deepEqual(JSON.parse(request.init.body), { username: 'demo1', kdfSalt: 'salt-b64', authKey: 'auth-key-b64' })
   } finally {
     restore()
   }
 })
 
 test('setUserDisabled uses PATCH and encoded id', async () => {
-  const user = { id: 'user/id', username: 'demo1', role: 'user', disabled: 1, must_change_password: 0, created_at: '2026-01-01', updated_at: '2026-01-01' }
   let request
   const restore = mockFetch(
-    new Response(JSON.stringify({ user }), { headers: { 'Content-Type': 'application/json' } }),
+    new Response(JSON.stringify({ user: adminUser({ id: 'user/id', disabled: 1 }) }), { headers: { 'Content-Type': 'application/json' } }),
     (input, init) => { request = { input, init } },
   )
   try {
@@ -68,18 +79,17 @@ test('setUserDisabled uses PATCH and encoded id', async () => {
   }
 })
 
-test('resetUserPassword uses POST and encoded id', async () => {
-  const user = { id: 'user/id', username: 'demo1', role: 'user', disabled: 0, must_change_password: 1, created_at: '2026-01-01', updated_at: '2026-01-01' }
+test('resetUserPassword posts kdfSalt and authKey', async () => {
   let request
   const restore = mockFetch(
-    new Response(JSON.stringify({ user }), { headers: { 'Content-Type': 'application/json' } }),
+    new Response(JSON.stringify({ user: adminUser({ id: 'user/id' }) }), { headers: { 'Content-Type': 'application/json' } }),
     (input, init) => { request = { input, init } },
   )
   try {
-    await resetUserPassword('user/id', 'temporary-password')
+    await resetUserPassword('user/id', 'salt-b64', 'auth-key-b64')
     assert.equal(request.input, '/api/admin/users/user%2Fid/password')
     assert.equal(request.init.method, 'POST')
-    assert.deepEqual(JSON.parse(request.init.body), { password: 'temporary-password' })
+    assert.deepEqual(JSON.parse(request.init.body), { kdfSalt: 'salt-b64', authKey: 'auth-key-b64' })
   } finally {
     restore()
   }
