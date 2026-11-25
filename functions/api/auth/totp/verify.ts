@@ -133,11 +133,14 @@ export function createVerifyTotpHandler(
       })
       await clearLoginFailures(authRepository, user.username, challenge.ip_hash)
 
+      const stored = await authRepository.findUser(user.username)
       return jsonResponse({ user: {
         id: user.id,
         username: user.username,
         role: user.role,
         mustChangePassword: user.must_change_password === 1,
+        legacy: stored ? stored.kdf_salt === null : true,
+        keysReady: stored ? stored.wrapped_master_key !== null : false,
       } }, 200, {
         'Set-Cookie': sessionCookie(token),
       })

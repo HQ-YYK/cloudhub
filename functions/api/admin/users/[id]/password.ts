@@ -1,9 +1,10 @@
 import type { PagesFunction } from '@cloudflare/workers-types'
 import type { AuthRepository } from '../../../../_lib/auth-repository.ts'
-import { getAuthenticatedUser, hashPassword, MIN_INITIAL_PASSWORD_LENGTH } from '../../../../_lib/auth.ts'
+import { getAuthenticatedUser, hashPassword } from '../../../../_lib/auth.ts'
 import { createD1AuthRepository } from '../../../../_lib/d1-auth-repository.ts'
 import type { AuthEnv } from '../../../../_lib/cloudflare-env.ts'
 import { jsonResponse, methodNotAllowed, sameOriginRequest } from '../../../../_lib/http.ts'
+import { isValidAuthKey, isValidKdfSalt, KDF_ITERATIONS } from '../../../../_lib/keys.ts'
 
 interface AdminPasswordDependencies {
   createAuthRepository: (env: AuthEnv) => AuthRepository
@@ -39,7 +40,7 @@ export function createAdminPasswordHandler(
       if (!target) return jsonResponse({ error: 'not_found' }, 404)
       if (target.role === 'admin') return jsonResponse({ error: 'forbidden' }, 403)
 
-      let payload: { password?: unknown }
+      let payload: { kdfSalt?: unknown, authKey?: unknown }
       try {
         const body = await context.request.text()
         if (body.length > 2048) return jsonResponse({ error: 'invalid_request' }, 400)
@@ -47,20 +48,18 @@ export function createAdminPasswordHandler(
       } catch {
         return jsonResponse({ error: 'invalid_request' }, 400)
       }
-      if (
-        typeof payload.password !== 'string'
-        || payload.password.length < MIN_INITIAL_PASSWORD_LENGTH
-        || payload.password.length > 256
-      ) {
-        return jsonResponse({ error: 'weak_password' }, 400)
+      if (!isValidKdfSalt(payload.kdfSalt) || !isValidAuthKey(payload.authKey)) {
+        return jsonResponse({ error: 'invalid_request' }, 400)
       }
 
-      const password = await hashPassword(payload.password)
+      const password = await hashPassword(payload.authKey)
       await repository.updatePassword(
         id,
         password.hash,
         password.salt,
         password.iterations,
+        payload.kdfSalt,
+        KDF_ITERATIONS,
         1,
         new Date().toISOString(),
       )
