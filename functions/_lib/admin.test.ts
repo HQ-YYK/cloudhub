@@ -129,6 +129,14 @@ test('admin can create a user without exposing password fields and rejects inval
   assert.equal(response.status, 400)
   assert.deepEqual(await response.json(), { error: 'invalid_request' })
 
+  response = await call(handler, 'POST', { username: 'a'.repeat(33), password: 'twelvechars12' })
+  assert.equal(response.status, 400)
+
+  for (const username of ['f', 'fu', 'xiao']) {
+    response = await call(handler, 'POST', { username, password: 'twelvechars12' })
+    assert.equal(response.status, 201, username)
+  }
+
   response = await call(handler, 'POST', { username: 'alice', password: 'short' })
   assert.equal(response.status, 400)
   assert.deepEqual(await response.json(), { error: 'weak_password' })

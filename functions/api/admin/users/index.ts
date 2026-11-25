@@ -51,7 +51,7 @@ export function createAdminUsersHandler(
       }
       if (
         typeof payload.username !== 'string'
-        || !/^[A-Za-z0-9_.-]{3,32}$/u.test(payload.username)
+        || !/^[A-Za-z0-9_.-]{1,32}$/u.test(payload.username)
       ) {
         return jsonResponse({ error: 'invalid_request' }, 400)
       }
