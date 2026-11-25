@@ -132,7 +132,8 @@ export interface TrashRepository {
   findTrashFile(ownerId: string, id: string, cutoff: string): Promise<TrashItem | null>
   hasActiveNameConflict(ownerId: string, parentId: string | null, nameKey: string): Promise<boolean>
   restoreFile(ownerId: string, id: string, updatedAt: string): Promise<FileRecord | null>
-  markFilePurged(ownerId: string, id: string, purgedAt: string): Promise<void>
+  deleteTrashedFile(ownerId: string, id: string): Promise<void>
+  deleteExpiredTrash(ownerId: string, cutoff: string): Promise<number>
   listTrashObjectKeys(ownerId: string, cutoff: string, limit: number): Promise<Array<{ id: string, object_key: string }>>
   countTrash(ownerId: string, cutoff: string): Promise<number>
 }

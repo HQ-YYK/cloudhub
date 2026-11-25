@@ -156,13 +156,22 @@ function makeTrashRepository(initial: FileRecord[] = []) {
       record.updated_at = updatedAt
       return record
     },
-    async markFilePurged(ownerId, id, purgedAt) {
-      const record = records.find(
-        (candidate) => candidate.id === id
-          && candidate.owner_id === ownerId
-          && (candidate.purged_at === null || candidate.purged_at === undefined),
+    async deleteTrashedFile(ownerId, id) {
+      const index = records.findIndex(
+        (candidate) => candidate.id === id && candidate.owner_id === ownerId && candidate.deleted_at !== null,
       )
-      if (record) record.purged_at = purgedAt
+      if (index >= 0) records.splice(index, 1)
+    },
+    async deleteExpiredTrash(ownerId, cutoff) {
+      let removed = 0
+      for (let index = records.length - 1; index >= 0; index -= 1) {
+        const record = records[index]
+        if (record.owner_id === ownerId && record.kind === 'file' && record.deleted_at !== null && record.deleted_at <= cutoff) {
+          records.splice(index, 1)
+          removed += 1
+        }
+      }
+      return removed
     },
     async listTrashObjectKeys(ownerId, cutoff, limit) {
       return records
@@ -268,8 +277,9 @@ test('list returns only own, recent, unpurged files with expires_at and parent_n
   const expired = trashed({ id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', object_key: 'objects/d', deleted_at: '2029-12-01T00:00:00.000Z' })
   const purged = trashed({ id: 'ffffffff-ffff-4fff-8fff-ffffffffffff', object_key: 'objects/e', deleted_at: '2030-01-09T00:00:00.000Z', purged_at: '2030-01-12T00:00:00.000Z' })
 
-  const { overrides } = buildOverrides({ records: [parent, first, second, foreign, expired, purged] })
+  const { overrides, records } = buildOverrides({ records: [parent, first, second, foreign, expired, purged] })
   const response = await run(createTrashHandler(overrides), listRequest())
+  assert.equal(records.some((record) => record.id === expired.id), false)
 
   assert.equal(response.status, 200)
   const payload = await response.json() as { items: Array<{ id: string, parent_name: string | null, expires_at: string }> }
@@ -317,14 +327,14 @@ test('restore returns conflict for an active same-name sibling without touching 
   assert.deepEqual(untrashed, [])
 })
 
-test('restore returns purged and records purged_at when Drive returns 404', async () => {
+test('restore returns purged and deletes the row when Drive returns 404', async () => {
   const { overrides, records, untrashError } = buildOverrides({ records: [trashed()] })
   untrashError.current = new BlobStoreError('not_found', 'drive_object_not_found')
   const response = await run(createTrashRestoreHandler(overrides), restoreRequest(), { id: fileId })
 
   assert.equal(response.status, 410)
   assert.deepEqual(await response.json(), { error: 'purged' })
-  assert.equal(records[0].purged_at, now.toISOString())
+  assert.equal(records.some((record) => record.id === fileId), false)
 })
 
 test('restore hides files owned by another user', async () => {
@@ -334,14 +344,14 @@ test('restore hides files owned by another user', async () => {
   assert.deepEqual(untrashed, [])
 })
 
-test('purge one calls deletePermanently and marks the file purged', async () => {
+test('purge one calls deletePermanently and deletes the row', async () => {
   const { overrides, records, deletedPermanently } = buildOverrides({ records: [trashed()] })
   const response = await run(createTrashItemHandler(overrides), purgeRequest(), { id: fileId })
 
   assert.equal(response.status, 200)
   assert.deepEqual(await response.json(), { purged: true })
   assert.deepEqual(deletedPermanently, [objectKey])
-  assert.equal(records[0].purged_at, now.toISOString())
+  assert.equal(records.some((record) => record.id === fileId), false)
 })
 
 test('purge one treats a Drive 404 as success', async () => {
@@ -351,7 +361,7 @@ test('purge one treats a Drive 404 as success', async () => {
 
   assert.equal(response.status, 200)
   assert.deepEqual(await response.json(), { purged: true })
-  assert.equal(records[0].purged_at, now.toISOString())
+  assert.equal(records.some((record) => record.id === fileId), false)
 })
 
 test('purge one hides files owned by another user', async () => {

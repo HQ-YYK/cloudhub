@@ -149,7 +149,8 @@ function makeRepository(initial: FileRecord[], options: { conflictOnUpdate?: boo
         && (record.kind === 'directory' || record.storage_status !== 'failed'),
     ),
     restoreFile: async () => null,
-    markFilePurged: async () => undefined,
+    deleteTrashedFile: async () => undefined,
+    deleteExpiredTrash: async () => 0,
     listTrashObjectKeys: async () => [],
     countTrash: async () => 0,
   }

@@ -331,15 +331,27 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
       return restored
     },
 
-    async markFilePurged(ownerId, id, purgedAt) {
+    // Shares and upload sessions go with the row via ON DELETE CASCADE.
+    async deleteTrashedFile(ownerId, id) {
       await db.prepare(`
-        UPDATE files
-        SET purged_at = ?
+        DELETE FROM files
         WHERE id = ?
           AND owner_id = ?
           AND kind = 'file'
-          AND purged_at IS NULL
-      `).bind(purgedAt, id, ownerId).run()
+          AND deleted_at IS NOT NULL
+      `).bind(id, ownerId).run()
+    },
+
+    // Google empties the Drive trash after 30 days, so expired rows point at nothing.
+    async deleteExpiredTrash(ownerId, cutoff) {
+      const result = await db.prepare(`
+        DELETE FROM files
+        WHERE owner_id = ?
+          AND kind = 'file'
+          AND deleted_at IS NOT NULL
+          AND deleted_at <= ?
+      `).bind(ownerId, cutoff).run()
+      return result.meta.changes ?? 0
     },
 
     async listTrashObjectKeys(ownerId, cutoff, limit) {

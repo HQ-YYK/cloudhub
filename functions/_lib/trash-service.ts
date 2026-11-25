@@ -56,12 +56,14 @@ export function createTrashService(deps: TrashServiceDeps) {
   }
 
   async function markPurged(ownerId: string, fileId: string) {
-    await deps.trashRepository.markFilePurged(ownerId, fileId, now().toISOString())
+    await deps.trashRepository.deleteTrashedFile(ownerId, fileId)
   }
 
   async function list(request: Request) {
     const user = await authenticated(request)
-    const items = await deps.trashRepository.listTrash(user.id, cutoffIso())
+    const cutoff = cutoffIso()
+    await deps.trashRepository.deleteExpiredTrash(user.id, cutoff)
+    const items = await deps.trashRepository.listTrash(user.id, cutoff)
     return {
       items: items.map((item) => ({
         ...publicFileRecord(item),
