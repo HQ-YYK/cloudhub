@@ -13,16 +13,33 @@ import {
   sha256,
   verifyPassword,
 } from '../../../functions/_lib/auth.ts'
-import type { AuthRepository } from '../../../functions/_lib/auth-repository.ts'
+import type { AuthRepository, StoredUser } from '../../../functions/_lib/auth-repository.ts'
 import type { AuthEnv } from '../../../functions/_lib/cloudflare-env.ts'
 import { createD1AuthRepository } from '../../../functions/_lib/d1-auth-repository.ts'
 import { createD1TotpRepository } from '../../../functions/_lib/d1-totp-repository.ts'
 import { jsonResponse, methodNotAllowed, sameOriginRequest } from '../../../functions/_lib/http.ts'
+import { isValidAuthKey } from '../../../functions/_lib/keys.ts'
 import { CHALLENGE_TTL_MS, createChallengeToken } from '../../../functions/_lib/totp.ts'
 import type { TotpRepository } from '../../../functions/_lib/totp-repository.ts'
 
 const INVALID_LOGIN = { error: 'invalid_credentials' }
 const MAX_BODY_LENGTH = 2048
+
+const FAKE_USER: StoredUser = {
+  id: '',
+  username: '',
+  password_hash: 'A'.repeat(43),
+  password_salt: 'A'.repeat(22),
+  password_iterations: PASSWORD_ITERATIONS,
+  disabled: 1,
+  role: 'user',
+  must_change_password: 1,
+  kdf_salt: null,
+  kdf_iterations: null,
+  wrapped_master_key: null,
+  recovery_wrapped_key: null,
+  keys_updated_at: null,
+}
 
 interface LoginDependencies {
   createAuthRepository: (env: AuthEnv) => AuthRepository
@@ -49,23 +66,32 @@ export function createLoginHandler(
     if (!sameOriginRequest(context.request)) return jsonResponse({ error: 'forbidden' }, 403)
     if (!context.env.DB) return jsonResponse({ error: 'service_unavailable' }, 503)
 
-    let payload: { username?: unknown; password?: unknown }
+    let payload: { username?: unknown; password?: unknown; authKey?: unknown }
     try {
       const body = await context.request.text()
       if (body.length > MAX_BODY_LENGTH) return jsonResponse({ error: 'invalid_request' }, 400)
-      payload = JSON.parse(body) as { username?: unknown; password?: unknown }
+      payload = JSON.parse(body) as typeof payload
     } catch {
       return jsonResponse({ error: 'invalid_request' }, 400)
     }
 
     if (
       typeof payload.username !== 'string' ||
-      typeof payload.password !== 'string' ||
       payload.username.length < 1 ||
-      payload.username.length > 128 ||
-      payload.password.length < 1 ||
-      payload.password.length > 256
+      payload.username.length > 128
     ) {
+      return jsonResponse({ error: 'invalid_request' }, 400)
+    }
+
+    const hasPassword = typeof payload.password === 'string'
+    const hasAuthKey = typeof payload.authKey === 'string'
+    if (hasPassword === hasAuthKey) return jsonResponse({ error: 'invalid_request' }, 400)
+
+    const credential = (hasPassword ? payload.password : payload.authKey) as string
+    if (hasPassword && (credential.length < 1 || credential.length > 256)) {
+      return jsonResponse({ error: 'invalid_request' }, 400)
+    }
+    if (hasAuthKey && !isValidAuthKey(payload.authKey)) {
       return jsonResponse({ error: 'invalid_request' }, 400)
     }
 
@@ -79,21 +105,19 @@ export function createLoginHandler(
       if (isLoginBlocked(attempt, now)) return jsonResponse(INVALID_LOGIN, 401)
 
       const user = await findUser(repository, payload.username)
-      const passwordRecord = user ?? {
-        password_hash: 'A'.repeat(43),
-        password_salt: 'A'.repeat(22),
-        password_iterations: PASSWORD_ITERATIONS,
-        disabled: 1,
-        role: 'user',
-        must_change_password: 1,
+      const expectsPassword = (user?.kdf_salt ?? null) === null
+      let credentialMatches = false
+      if (user && expectsPassword === hasPassword) {
+        credentialMatches = await verifyPassword(
+          credential,
+          user.password_hash,
+          user.password_salt,
+          user.password_iterations,
+        )
+      } else {
+        await verifyPassword(credential, FAKE_USER.password_hash, FAKE_USER.password_salt, FAKE_USER.password_iterations)
       }
-      const passwordMatches = await verifyPassword(
-        payload.password,
-        passwordRecord.password_hash,
-        passwordRecord.password_salt,
-        passwordRecord.password_iterations,
-      )
-      const valid = Boolean(user && user.disabled === 0 && passwordMatches)
+      const valid = Boolean(user && user.disabled === 0 && credentialMatches)
 
       if (!valid || !user) {
         await recordLoginFailure(repository, payload.username, ipHash, now)
@@ -135,6 +159,8 @@ export function createLoginHandler(
         username: user.username,
         role: user.role,
         mustChangePassword: user.must_change_password === 1,
+        legacy: user.kdf_salt === null,
+        keysReady: user.wrapped_master_key !== null,
       } }, 200, {
         'Set-Cookie': sessionCookie(token),
       })

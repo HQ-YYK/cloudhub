@@ -42,6 +42,8 @@ export function createMeHandler(
         username: user.username,
         role: user.role,
         mustChangePassword: user.mustChangePassword,
+        legacy: user.legacy,
+        keysReady: user.keysReady,
         totpEnabled: Boolean(totpUser?.totp_secret_ciphertext),
       } })
     } catch (error) {

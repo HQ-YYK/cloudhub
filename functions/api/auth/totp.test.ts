@@ -274,6 +274,11 @@ async function storedUser(password: string) {
     disabled: 0,
     role: 'user',
     must_change_password: 0,
+    kdf_salt: null,
+    kdf_iterations: null,
+    wrapped_master_key: null,
+    recovery_wrapped_key: null,
+    keys_updated_at: null,
   }
   return stored
 }
@@ -366,7 +371,7 @@ test('verify accepts a valid code, deletes the challenge, and issues a session',
 
   assert.equal(response.status, 200)
   const body = await response.json() as { user: Record<string, unknown> }
-  assert.deepEqual(body.user, { id: userId, username: 'alice', role: 'user', mustChangePassword: false })
+  assert.deepEqual(body.user, { id: userId, username: 'alice', role: 'user', mustChangePassword: false, legacy: true, keysReady: false })
   assert.match(response.headers.get('Set-Cookie') ?? '', /^cloudhub_session=/)
   assert.ok(totp.deletedChallenges.includes(tokenHash))
   assert.equal(auth.sessions.length, 1)

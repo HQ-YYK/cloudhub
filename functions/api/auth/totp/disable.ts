@@ -3,6 +3,7 @@ import {
   getAuthenticatedUser,
   getLoginAttempt,
   isLoginBlocked,
+  PASSWORD_ITERATIONS,
   recordLoginFailure,
   sha256,
   verifyPassword,
@@ -12,6 +13,7 @@ import type { AuthEnv } from '../../../_lib/cloudflare-env.ts'
 import { createD1AuthRepository } from '../../../_lib/d1-auth-repository.ts'
 import { createD1TotpRepository } from '../../../_lib/d1-totp-repository.ts'
 import { jsonResponse, methodNotAllowed, sameOriginRequest } from '../../../_lib/http.ts'
+import { isValidAuthKey } from '../../../_lib/keys.ts'
 import { decryptSecret } from '../../../_lib/secret-box.ts'
 import { verifyTotpCode } from '../../../_lib/totp.ts'
 import type { TotpRepository } from '../../../_lib/totp-repository.ts'
@@ -45,7 +47,7 @@ export function createTotpDisableHandler(
     const encryptionKey = context.env.STORAGE_ENCRYPTION_KEY
     if (!encryptionKey) return jsonResponse({ error: 'service_unavailable' }, 503)
 
-    let payload: { password?: unknown; code?: unknown }
+    let payload: { password?: unknown; authKey?: unknown; code?: unknown }
     try {
       const body = await context.request.text()
       if (body.length > MAX_BODY_LENGTH) return jsonResponse({ error: 'invalid_request' }, 400)
@@ -53,7 +55,13 @@ export function createTotpDisableHandler(
     } catch {
       return jsonResponse({ error: 'invalid_request' }, 400)
     }
-    if (typeof payload.password !== 'string' || typeof payload.code !== 'string') {
+
+    const hasPassword = typeof payload.password === 'string'
+    const hasAuthKey = typeof payload.authKey === 'string'
+    if (typeof payload.code !== 'string' || hasPassword === hasAuthKey) {
+      return jsonResponse({ error: 'invalid_request' }, 400)
+    }
+    if (hasAuthKey && !isValidAuthKey(payload.authKey)) {
       return jsonResponse({ error: 'invalid_request' }, 400)
     }
 
@@ -72,13 +80,21 @@ export function createTotpDisableHandler(
       const attempt = await getLoginAttempt(authRepository, user.username, ipHash)
       if (isLoginBlocked(attempt, now)) return jsonResponse({ error: 'invalid_credentials' }, 401)
 
-      const passwordMatches = await verifyPassword(
-        payload.password,
-        stored.password_hash,
-        stored.password_salt,
-        stored.password_iterations,
-      )
-      if (!passwordMatches) {
+      const legacy = stored.kdf_salt === null
+      const credential = (hasPassword ? payload.password : payload.authKey) as string
+      let credentialMatches = false
+      if (legacy === hasPassword) {
+        credentialMatches = await verifyPassword(
+          credential,
+          stored.password_hash,
+          stored.password_salt,
+          stored.password_iterations,
+        )
+      } else {
+        await verifyPassword(credential, 'A'.repeat(43), 'A'.repeat(22), PASSWORD_ITERATIONS)
+      }
+
+      if (!credentialMatches) {
         await recordLoginFailure(authRepository, user.username, ipHash, now)
         return jsonResponse({ error: 'invalid_credentials' }, 401)
       }
