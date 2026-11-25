@@ -330,3 +330,13 @@
   .share-dialog { width: 100%; max-height: 100vh; border-radius: 0; }
   .share-row-link input { flex-basis: 100%; }
 }
+
+.auth-card.is-wide { width: min(100%, 560px); }
+.recovery-code-step { display: grid; gap: 16px; margin-top: 24px; }
+.recovery-code-panel { display: grid; gap: 14px; }
+.recovery-code-warning { margin: 0; padding: 12px 14px; color: #9a2f3a; background: #fff0f1; border: 1px solid #f5d5d9; border-radius: 8px; font-size: 13px; line-height: 1.7; }
+.recovery-code-display { display: block; width: 100%; padding: 14px 16px; color: var(--ink); background: #fbfcff; border: 1px solid #e1e6f0; border-radius: 10px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 15px; letter-spacing: .5px; line-height: 1.7; word-break: break-all; }
+.recovery-code-save { display: flex; align-items: center; gap: 8px; color: var(--ink); font-size: 13px; font-weight: 650; }
+.recovery-code-save input { width: 16px; height: 16px; }
+.subtle-link { padding: 0; color: #a6afc0; background: transparent; border: 0; font-size: 12px; }
+.subtle-link:hover { color: var(--blue); }

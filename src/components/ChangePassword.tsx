@@ -1,13 +1,12 @@
 import { useState, type FormEvent } from 'react'
-import { changePassword, AuthRequestError } from '../api/auth'
+import { changePassword } from '../api/auth'
+import { deriveFromPassword, generateKdfSalt, wrapMasterKey } from '../crypto'
 import { useAuth } from '../auth/useAuth'
+import { credentialFor } from '../auth/credential'
+import { authErrorMessage } from '../auth/errors'
 
-type ChangePasswordProps = {
-  forced?: boolean
-}
-
-export default function ChangePassword({ forced = false }: ChangePasswordProps) {
-  const { passwordChanged, logout } = useAuth()
+export default function ChangePassword() {
+  const { user, masterKey, passwordChanged } = useAuth()
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -19,6 +18,14 @@ export default function ChangePassword({ forced = false }: ChangePasswordProps) 
     event.preventDefault()
     setError('')
     setSuccess('')
+    if (!user || !masterKey) {
+      setError('请先解锁后再修改密码')
+      return
+    }
+    if (!currentPassword) {
+      setError('请输入当前密码')
+      return
+    }
     if (newPassword.length < 12) {
       setError('新密码至少 12 位')
       return
@@ -34,35 +41,39 @@ export default function ChangePassword({ forced = false }: ChangePasswordProps) 
 
     setSubmitting(true)
     try {
-      await changePassword(currentPassword, newPassword)
+      const credential = await credentialFor(user.username, currentPassword)
+      if (!('authKey' in credential)) {
+        setError('当前账号格式不支持修改密码')
+        return
+      }
+      const kdfSalt = generateKdfSalt()
+      const derived = await deriveFromPassword(newPassword, kdfSalt)
+      const wrappedMasterKey = await wrapMasterKey(masterKey, derived.wrapKey, user.id)
+      await changePassword({
+        currentAuthKey: credential.authKey,
+        newKdfSalt: kdfSalt,
+        newAuthKey: derived.authKey,
+        wrappedMasterKey,
+      })
       passwordChanged()
       setCurrentPassword('')
       setNewPassword('')
       setConfirmPassword('')
-      setSuccess(forced ? '' : '密码已修改，其他设备已退出登录')
+      setSuccess('密码已修改，其他设备已退出登录')
     } catch (requestError) {
-      if (requestError instanceof AuthRequestError) {
-        if (requestError.code === 'invalid_credentials') {
-          setError('当前密码不正确，或尝试次数过多，请稍后再试')
-        } else if (requestError.code === 'weak_password') {
-          setError('新密码至少 12 位，且不能与当前密码相同')
-        } else {
-          setError('修改密码失败，请稍后重试')
-        }
-      } else {
-        setError('修改密码失败，请稍后重试')
-      }
+      setError(authErrorMessage(requestError, '修改密码失败，请稍后重试'))
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <section className={forced ? 'forced-password-page' : 'drive-list-panel account-settings-panel'} aria-labelledby="change-password-heading">
+    <section className="drive-list-panel account-settings-panel" aria-labelledby="change-password-heading">
       <div className="account-settings-heading">
         <p className="workspace-kicker">ACCOUNT SETTINGS</p>
         <h2 id="change-password-heading">修改密码</h2>
       </div>
+      <p className="totp-description">忘记密码时只能用恢复码找回文件，请确认你还保存着恢复码。</p>
       <form className="password-form" onSubmit={(event) => void handleSubmit(event)}>
         <label>当前密码
           <input type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} disabled={submitting} />
@@ -77,9 +88,8 @@ export default function ChangePassword({ forced = false }: ChangePasswordProps) 
         {success && <p className="account-success" role="status">{success}</p>}
         <div className="password-actions">
           <button className="primary-small-button" type="submit" disabled={submitting}>
-            {submitting ? '修改中…' : '修改密码'}
+            {submitting ? '正在计算密钥…' : '修改密码'}
           </button>
-          {forced && <button className="secondary-small-button" type="button" onClick={() => void logout()}>退出登录</button>}
         </div>
       </form>
     </section>

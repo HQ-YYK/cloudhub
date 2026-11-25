@@ -58,10 +58,10 @@ export async function listUsers(): Promise<AdminUser[]> {
   return payload.users
 }
 
-export async function createUser(username: string, password: string): Promise<AdminUser> {
+export async function createUser(username: string, kdfSalt: string, authKey: string): Promise<AdminUser> {
   const payload = await requestAdmin('/api/admin/users', {
     method: 'POST',
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username, kdfSalt, authKey }),
   })
   if (!payload.user) throw new AdminRequestError(500, 'invalid_response')
   return payload.user
@@ -76,10 +76,10 @@ export async function setUserDisabled(id: string, disabled: boolean): Promise<Ad
   return payload.user
 }
 
-export async function resetUserPassword(id: string, password: string): Promise<AdminUser> {
+export async function resetUserPassword(id: string, kdfSalt: string, authKey: string): Promise<AdminUser> {
   const payload = await requestAdmin(`/api/admin/users/${encodeURIComponent(id)}/password`, {
     method: 'POST',
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({ kdfSalt, authKey }),
   })
   if (!payload.user) throw new AdminRequestError(500, 'invalid_response')
   return payload.user
