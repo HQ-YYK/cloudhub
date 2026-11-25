@@ -11,7 +11,7 @@ import {
 function errorMessage(error: unknown, action: 'load' | 'create' | 'reset' | 'disable') {
   if (error instanceof AdminRequestError) {
     if (error.code === 'username_taken') return '用户名已存在'
-    if (error.code === 'invalid_request') return '用户名只能用 3~32 位字母、数字、`_ . -`'
+    if (error.code === 'invalid_request') return '用户名只能用 1~32 位字母、数字、`_ . -`'
     if (error.code === 'weak_password') return '密码至少 12 位'
     if (error.code === 'forbidden') return '没有权限'
   }
@@ -70,8 +70,8 @@ export default function AdminUsers() {
     event.preventDefault()
     setError('')
     setSuccess('')
-    if (!/^[A-Za-z0-9_.-]{3,32}$/u.test(username)) {
-      setError('用户名只能用 3~32 位字母、数字、`_ . -`')
+    if (!/^[A-Za-z0-9_.-]{1,32}$/u.test(username)) {
+      setError('用户名只能用 1~32 位字母、数字、`_ . -`')
       return
     }
     if (password.length < 12 || password.length > 256) {
