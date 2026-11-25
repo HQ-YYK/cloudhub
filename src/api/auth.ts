@@ -4,7 +4,6 @@ export type AuthUser = {
   role: 'admin' | 'user'
   mustChangePassword: boolean
   totpEnabled?: boolean
-  legacy: boolean
   keysReady: boolean
 }
 
@@ -19,16 +18,11 @@ export type LoginResult =
 
 export type TotpCredential = { code: string } | { recoveryCode: string }
 
-export type LoginCredential =
-  | { username: string; password: string }
-  | { username: string; authKey: string }
+export type LoginCredential = { username: string; authKey: string }
 
-export type PreloginResult =
-  | { legacy: true }
-  | { legacy: false; kdfSalt: string; kdfIterations: number }
+export type PreloginResult = { kdfSalt: string; kdfIterations: number }
 
 export type KeysResponse = {
-  legacy: boolean
   kdfSalt: string | null
   kdfIterations: number | null
   wrappedMasterKey: string | null
@@ -37,8 +31,7 @@ export type KeysResponse = {
 }
 
 export type PasswordChangeBody = {
-  currentAuthKey?: string
-  currentPassword?: string
+  currentAuthKey: string
   newKdfSalt: string
   newAuthKey: string
   wrappedMasterKey: string
@@ -53,7 +46,7 @@ export type ResetKeysBody = {
   recoveryWrappedKey: string
 }
 
-export type DisableTotpCredential = { authKey: string } | { password: string }
+export type DisableTotpCredential = { authKey: string }
 
 export class AuthRequestError extends Error {
   readonly status: number
@@ -104,13 +97,12 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
 }
 
 export async function prelogin(username: string): Promise<PreloginResult> {
-  const payload = await requestAuth<{ legacy?: boolean; kdfSalt?: string | null; kdfIterations?: number | null; error?: string }>('/api/auth/prelogin', {
+  const payload = await requestAuth<{ kdfSalt?: string | null; kdfIterations?: number | null; error?: string }>('/api/auth/prelogin', {
     method: 'POST',
     body: JSON.stringify({ username }),
   })
-  if (payload.legacy === true) return { legacy: true }
   if (typeof payload.kdfSalt === 'string' && typeof payload.kdfIterations === 'number') {
-    return { legacy: false, kdfSalt: payload.kdfSalt, kdfIterations: payload.kdfIterations }
+    return { kdfSalt: payload.kdfSalt, kdfIterations: payload.kdfIterations }
   }
   throw new AuthRequestError(500, 'invalid_response')
 }
@@ -167,9 +159,7 @@ export async function logout(): Promise<void> {
 }
 
 export async function getKeys(): Promise<KeysResponse> {
-  const payload = await requestAuth<KeysResponse>('/api/auth/keys')
-  if (typeof payload.legacy !== 'boolean') throw new AuthRequestError(500, 'invalid_response')
-  return payload
+  return requestAuth<KeysResponse>('/api/auth/keys')
 }
 
 export async function changePassword(body: PasswordChangeBody): Promise<void> {

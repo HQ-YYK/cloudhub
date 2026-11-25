@@ -110,10 +110,7 @@ export default function TotpSettings() {
     setBusy('disable')
     try {
       const credential = await credentialFor(user?.username ?? '', disablePassword)
-      const totpCredential = 'password' in credential
-        ? { password: credential.password }
-        : { authKey: credential.authKey }
-      await disableTotp(totpCredential, disableCode)
+      await disableTotp({ authKey: credential.authKey }, disableCode)
       totpChanged(false)
       setDisableOpen(false)
       setDisablePassword('')

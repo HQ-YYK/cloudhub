@@ -32,10 +32,6 @@ export default function RegenerateRecoveryCode() {
     setBusy(true)
     try {
       const credential = await credentialFor(currentUser.username, currentPassword)
-      if (!('authKey' in credential)) {
-        setError('当前账号格式不支持重新生成恢复码')
-        return
-      }
       setCurrentAuthKey(credential.authKey)
       setRecovery(generateRecoveryKey())
       setSaved(false)

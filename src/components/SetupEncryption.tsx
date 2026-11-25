@@ -35,7 +35,7 @@ export default function SetupEncryption({ mode }: SetupEncryptionProps) {
 
   if (!user) return null
 
-  if (mode === 'reset' && (!pendingCredential || !('authKey' in pendingCredential))) {
+  if (mode === 'reset' && !pendingCredential) {
     return (
       <main className="auth-page">
         <section className="auth-card" aria-labelledby="reset-missing-title">
@@ -52,10 +52,6 @@ export default function SetupEncryption({ mode }: SetupEncryptionProps) {
 
   const currentUser = user
   const needsCurrentPassword = mode === 'password' && !currentCredential
-  const isLegacy = currentCredential ? 'password' in currentCredential : currentUser.legacy
-  const currentPasswordForCompare = currentCredential && 'password' in currentCredential
-    ? currentCredential.password
-    : currentPassword
 
   async function handleNext(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -70,10 +66,6 @@ export default function SetupEncryption({ mode }: SetupEncryptionProps) {
     }
     if (newPassword !== confirmPassword) {
       setError('两次输入的新密码不一致')
-      return
-    }
-    if (isLegacy && newPassword === currentPasswordForCompare) {
-      setError('新密码不能与当前密码相同')
       return
     }
 
@@ -112,10 +104,6 @@ export default function SetupEncryption({ mode }: SetupEncryptionProps) {
       const recoveryWrappedKey = await wrapMasterKey(mk, await recoveryWrapKey(recovery.bytes), currentUser.id)
 
       if (mode === 'reset') {
-        if (!('authKey' in currentCredential)) {
-          setError('设置尚未完成，请重试')
-          return
-        }
         await resetKeys({
           currentAuthKey: currentCredential.authKey,
           newKdfSalt,
@@ -124,11 +112,8 @@ export default function SetupEncryption({ mode }: SetupEncryptionProps) {
           recoveryWrappedKey,
         })
       } else {
-        const currentBody = 'password' in currentCredential
-          ? { currentPassword: currentCredential.password }
-          : { currentAuthKey: currentCredential.authKey }
         await changePassword({
-          ...currentBody,
+          currentAuthKey: currentCredential.authKey,
           newKdfSalt,
           newAuthKey,
           wrappedMasterKey,
