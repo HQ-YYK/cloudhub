@@ -125,6 +125,7 @@ export interface TrashItem {
   updated_at: string
   deleted_at: string
   parent_name: string | null
+  item_count: number | null
 }
 
 export interface TrashRepository {
@@ -136,4 +137,26 @@ export interface TrashRepository {
   deleteExpiredTrash(ownerId: string, cutoff: string): Promise<number>
   listTrashObjectKeys(ownerId: string, cutoff: string, limit: number): Promise<Array<{ id: string, object_key: string }>>
   countTrash(ownerId: string, cutoff: string): Promise<number>
+}
+
+export interface FolderDeleteRepository {
+  countFolderDescendants(ownerId: string, id: string): Promise<number>
+  hasPendingDescendant(ownerId: string, id: string): Promise<boolean>
+  softDeleteFolderTree(ownerId: string, id: string, deletedAt: string, updatedAt: string): Promise<number>
+}
+
+export interface TrashTreeRepository {
+  findActiveDirectory(ownerId: string, id: string): Promise<{ id: string } | null>
+  restoreFolderTree(
+    ownerId: string,
+    id: string,
+    deletedAt: string,
+    targetParentId: string | null,
+    updatedAt: string,
+  ): Promise<FileRecord | null>
+  deleteTrashedBatch(ownerId: string, deletedAt: string): Promise<number>
+  listBatchObjectKeys(ownerId: string, deletedAt: string, limit: number): Promise<Array<{ id: string, object_key: string }>>
+  countBatchFiles(ownerId: string, deletedAt: string): Promise<number>
+  purgeEmptyTrashFolders(ownerId: string, cutoff: string): Promise<number>
+  listExpiredLiveObjectKeys(ownerId: string, cutoff: string, limit: number): Promise<Array<{ id: string, object_key: string }>>
 }

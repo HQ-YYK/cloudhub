@@ -254,15 +254,27 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
       return db.prepare(`
         SELECT f.id, f.owner_id, f.parent_id, f.kind, f.name, f.name_key, f.object_key,
                f.size_bytes, f.mime_type, f.created_at, f.updated_at, f.deleted_at,
-               parent.name AS parent_name
+               parent.name AS parent_name,
+               CASE WHEN f.kind = 'directory' THEN (
+                 SELECT COUNT(*)
+                 FROM files c
+                 WHERE c.owner_id = f.owner_id
+                   AND c.deleted_at = f.deleted_at
+                   AND c.id <> f.id
+               ) ELSE NULL END AS item_count
         FROM files f
         LEFT JOIN files parent
           ON parent.id = f.parent_id AND parent.owner_id = f.owner_id
         WHERE f.owner_id = ?
-          AND f.kind = 'file'
           AND f.deleted_at IS NOT NULL
           AND f.purged_at IS NULL
           AND f.deleted_at > ?
+          AND (
+            f.parent_id IS NULL
+            OR parent.id IS NULL
+            OR parent.deleted_at IS NULL
+            OR parent.deleted_at <> f.deleted_at
+          )
         ORDER BY f.deleted_at DESC
         LIMIT 500
       `).bind(ownerId, cutoff).all<TrashItem>().then((result) => result.results)
@@ -272,13 +284,19 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
       return db.prepare(`
         SELECT f.id, f.owner_id, f.parent_id, f.kind, f.name, f.name_key, f.object_key,
                f.size_bytes, f.mime_type, f.created_at, f.updated_at, f.deleted_at,
-               parent.name AS parent_name
+               parent.name AS parent_name,
+               CASE WHEN f.kind = 'directory' THEN (
+                 SELECT COUNT(*)
+                 FROM files c
+                 WHERE c.owner_id = f.owner_id
+                   AND c.deleted_at = f.deleted_at
+                   AND c.id <> f.id
+               ) ELSE NULL END AS item_count
         FROM files f
         LEFT JOIN files parent
           ON parent.id = f.parent_id AND parent.owner_id = f.owner_id
         WHERE f.id = ?
           AND f.owner_id = ?
-          AND f.kind = 'file'
           AND f.deleted_at IS NOT NULL
           AND f.purged_at IS NULL
           AND f.deleted_at > ?
@@ -344,12 +362,22 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
 
     // Google empties the Drive trash after 30 days, so expired rows point at nothing.
     async deleteExpiredTrash(ownerId, cutoff) {
+      await db.prepare(`
+        UPDATE files
+        SET parent_id = NULL
+        WHERE owner_id = ?
+          AND parent_id IS NOT NULL
+          AND deleted_at IS NOT NULL
+          AND deleted_at <= ?
+      `).bind(ownerId, cutoff).run()
+
+      // Keep expired files whose Drive object still exists; the trash service deletes them first.
       const result = await db.prepare(`
         DELETE FROM files
         WHERE owner_id = ?
-          AND kind = 'file'
           AND deleted_at IS NOT NULL
           AND deleted_at <= ?
+          AND NOT (kind = 'file' AND object_key IS NOT NULL AND storage_status <> 'deleting')
       `).bind(ownerId, cutoff).run()
       return result.meta.changes ?? 0
     },

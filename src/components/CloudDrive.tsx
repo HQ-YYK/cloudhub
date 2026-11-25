@@ -22,6 +22,8 @@ type DirectoryLevel = {
 function requestErrorMessage(error: unknown, action: 'list' | 'create' | 'download' | 'delete') {
   if (error instanceof FilesRequestError) {
     if (error.code === 'password_change_required') return '请先修改密码'
+    if (error.code === 'folder_too_large') return '文件夹内容超过 5000 项，请先分批删除里面的内容'
+    if (error.code === 'folder_busy') return '文件夹里有正在上传的文件，请等上传完成后再删除'
     if (error.status === 401) return '登录状态已失效，请重新登录后继续。'
     if (error.status === 403) return '请求来源未通过安全校验，请刷新页面后重试。'
     if (error.status === 409) return '当前目录中已经存在同名文件夹。'
@@ -37,7 +39,7 @@ function requestErrorMessage(error: unknown, action: 'list' | 'create' | 'downlo
     list: '目录加载失败，请稍后重试。',
     create: '文件夹创建失败，请稍后重试。',
     download: '文件下载失败，请稍后重试。',
-    delete: '文件删除失败，请稍后重试。',
+    delete: '删除失败，请稍后重试。',
   } satisfies Record<typeof action, string>
   return messages[action]
 }
@@ -268,7 +270,10 @@ export default function CloudDrive() {
   }
 
   async function handleDelete(item: DriveItem) {
-    if (!window.confirm(`确定把“${item.name}”移到回收站吗？30 天内可以在回收站恢复。`)) return
+    const message = item.kind === 'directory'
+      ? `确定把文件夹“${item.name}”及其中全部内容移到回收站吗？30 天内可以在回收站整体恢复。`
+      : `确定把“${item.name}”移到回收站吗？30 天内可以在回收站恢复。`
+    if (!window.confirm(message)) return
     setDeletingId(item.id)
     setActionError('')
     try {
@@ -429,6 +434,9 @@ export default function CloudDrive() {
                       <div className="drive-folder-menu" role="menu">
                         <button type="button" role="menuitem" onClick={() => { setFolderMenuId(null); startRename(item) }}>改名</button>
                         <button type="button" role="menuitem" onClick={() => { setFolderMenuId(null); startMove(item) }}>移动</button>
+                        <button type="button" role="menuitem" className="danger-text-button" onClick={() => { setFolderMenuId(null); void handleDelete(item) }}>
+                          {deletingId === item.id ? '删除中…' : '删除'}
+                        </button>
                       </div>
                     )}
                   </div>

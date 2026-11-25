@@ -64,11 +64,38 @@ test('purge uses DELETE and the encoded id', async () => {
     (input, init) => { request = { input, init } },
   )
   try {
-    await purgeTrashItem('file/id')
+    const result = await purgeTrashItem('file/id')
+    assert.deepEqual(result, { purged: 1, remaining: 0 })
     assert.equal(request.input, '/api/trash/file%2Fid')
     assert.equal(request.init.method, 'DELETE')
   } finally {
     restore()
+  }
+})
+
+test('purge folder loops until remaining reaches 0 and reports progress', async () => {
+  const calls = []
+  const responses = [
+    { purged: 40, remaining: 5 },
+    { purged: 5, remaining: 0 },
+  ]
+  const progress = []
+  const original = globalThis.fetch
+  globalThis.fetch = async (input, init) => {
+    calls.push({ input, init })
+    return new Response(JSON.stringify(responses[calls.length - 1]), {
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+  try {
+    const result = await purgeTrashItem('folder/id', (done) => progress.push(done))
+    assert.deepEqual(result, { purged: 45, remaining: 0 })
+    assert.deepEqual(progress, [40, 45])
+    assert.equal(calls.length, 2)
+    assert.equal(calls[0].input, '/api/trash/folder%2Fid')
+    assert.equal(calls[1].init.method, 'DELETE')
+  } finally {
+    globalThis.fetch = original
   }
 })
 

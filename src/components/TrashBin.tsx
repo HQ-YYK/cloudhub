@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { emptyTrash, listTrash, purgeTrashItem, restoreTrashItem, type TrashItem } from '../api/trash'
 import { FilesRequestError } from '../api/files'
+import { FolderIcon } from './DriveIcons'
 
 function TrashEmptyIcon() {
   return (
@@ -61,14 +62,16 @@ function daysUntilExpiry(expiresAt: string): string {
   return `${Math.ceil(days)} 天后永久删除`
 }
 
-function displayName(name: string): string {
+function displayName(name: string, kind: 'file' | 'directory'): string {
   const normalized = name.normalize('NFC').trim()
   const hasReplacementText = normalized.includes('�')
   const hasControlCharacter = [...normalized].some((character) => {
     const code = character.codePointAt(0) ?? 0
     return code <= 0x1f || code === 0x7f
   })
-  if (!normalized || hasReplacementText || hasControlCharacter) return '未命名文件'
+  if (!normalized || hasReplacementText || hasControlCharacter) {
+    return kind === 'directory' ? '未命名文件夹' : '未命名文件'
+  }
   return normalized
 }
 
@@ -81,6 +84,7 @@ export default function TrashBin() {
   const [notice, setNotice] = useState('')
   const [restoringId, setRestoringId] = useState<string | null>(null)
   const [purgingId, setPurgingId] = useState<string | null>(null)
+  const [purgeProgress, setPurgeProgress] = useState(0)
   const [emptying, setEmptying] = useState(false)
   const busy = restoringId !== null || purgingId !== null || emptying
 
@@ -129,18 +133,28 @@ export default function TrashBin() {
   }
 
   async function handlePurge(item: TrashItem) {
-    if (!window.confirm(`确定永久删除文件“${item.name}”吗？此操作无法撤销。`)) return
+    const count = item.item_count ?? 0
+    const message = item.kind === 'directory'
+      ? `彻底删除后无法恢复，文件夹中的 ${count} 项会一起删除。`
+      : `确定永久删除文件“${item.name}”吗？此操作无法撤销。`
+    if (!window.confirm(message)) return
     setPurgingId(item.id)
     setActionError('')
     setNotice('')
+    setPurgeProgress(0)
     try {
-      await purgeTrashItem(item.id)
-      setItems((previous) => previous.filter((entry) => entry.id !== item.id))
+      const result = await purgeTrashItem(item.id, (done) => setPurgeProgress(done))
+      if (result.remaining > 0) {
+        setActionError('存储暂时不可用，请稍后重试。')
+      } else {
+        setItems((previous) => previous.filter((entry) => entry.id !== item.id))
+      }
     } catch (error) {
       setActionError(requestErrorMessage(error))
       if (error instanceof FilesRequestError && error.status === 410) void loadTrash('refresh')
     } finally {
       setPurgingId(null)
+      setPurgeProgress(0)
     }
   }
 
@@ -211,11 +225,17 @@ export default function TrashBin() {
             {items.map((item) => (
               <article className="drive-file-card" key={item.id}>
                 <div className="drive-file-heading">
-                  <span className="drive-file-icon" aria-hidden="true"><FileIcon /></span>
-                  <strong className="drive-file-name" title={displayName(item.name)}>{displayName(item.name)}</strong>
+                  <span className="drive-file-icon" aria-hidden="true">
+                    {item.kind === 'directory' ? <FolderIcon /> : <FileIcon />}
+                  </span>
+                  <strong className="drive-file-name" title={displayName(item.name, item.kind)}>{displayName(item.name, item.kind)}</strong>
                 </div>
                 <div className="drive-file-meta">
-                  <span>{formatFileSize(item.size_bytes)} · {item.parent_name ?? '我的云盘'}</span>
+                  <span>
+                    {item.kind === 'directory'
+                      ? `文件夹 · 共 ${item.item_count ?? 0} 项`
+                      : `${formatFileSize(item.size_bytes)} · ${item.parent_name ?? '我的云盘'}`}
+                  </span>
                   <span>{formatDeletedAt(item.deleted_at)}</span>
                   <span>{daysUntilExpiry(item.expires_at)}</span>
                 </div>
@@ -224,7 +244,9 @@ export default function TrashBin() {
                     {restoringId === item.id ? '恢复中…' : '恢复'}
                   </button>
                   <button type="button" className="danger-text-button" onClick={() => void handlePurge(item)} disabled={busy}>
-                    {purgingId === item.id ? '删除中…' : '彻底删除'}
+                    {purgingId === item.id
+                      ? (item.kind === 'directory' ? `已删除 ${purgeProgress} 项` : '删除中…')
+                      : '彻底删除'}
                   </button>
                 </div>
               </article>

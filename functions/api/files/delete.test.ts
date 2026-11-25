@@ -74,6 +74,9 @@ class TestRepository implements FileRepository {
   listChildren = async () => []
   listVisibleChildren = async () => []
   findDirectory = async () => null
+  countFolderDescendants = async () => 0
+  hasPendingDescendant = async () => false
+  softDeleteFolderTree = async () => 0
   createDirectory = async () => {
     throw new Error('not_used')
   }
