@@ -6,6 +6,26 @@ import { useAuth } from '../auth/useAuth'
 type SetupState = {
   secret: string
   qrDataUrl: string
+  otpauthUrl: string
+}
+
+type TotpParamKey = 'issuer' | 'account' | 'secret' | 'type' | 'algorithm' | 'digits' | 'period'
+type CopiedKind = TotpParamKey | 'codes'
+
+function groupSecret(secret: string) {
+  return secret.replace(/(.{4})/g, '$1 ').trim()
+}
+
+function totpParamRows(secret: string, username: string): Array<{ key: TotpParamKey, label: string, value: string, display: string }> {
+  return [
+    { key: 'issuer', label: '发行方', value: 'CloudHub', display: 'CloudHub' },
+    { key: 'account', label: '账号', value: username, display: username },
+    { key: 'secret', label: '密钥', value: secret, display: groupSecret(secret) },
+    { key: 'type', label: '类型', value: '基于时间（TOTP）', display: '基于时间（TOTP）' },
+    { key: 'algorithm', label: '算法', value: 'SHA1', display: 'SHA1' },
+    { key: 'digits', label: '位数', value: '6', display: '6' },
+    { key: 'period', label: '时间间隔', value: '30 秒', display: '30 秒' },
+  ]
 }
 
 function totpError(error: unknown, action: 'setup' | 'enable' | 'disable') {
@@ -33,16 +53,17 @@ export default function TotpSettings() {
   const [busy, setBusy] = useState<'setup' | 'enable' | 'disable' | null>(null)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
-  const [copied, setCopied] = useState<'secret' | 'codes' | null>(null)
+  const [copied, setCopied] = useState<CopiedKind | null>(null)
 
   async function handleStartSetup() {
     setError('')
     setSuccess('')
+    setCopied(null)
     setBusy('setup')
     try {
       const result = await setupTotp()
       const qrDataUrl = await toDataURL(result.otpauthUrl)
-      setSetup({ secret: result.secret, qrDataUrl })
+      setSetup({ secret: result.secret, qrDataUrl, otpauthUrl: result.otpauthUrl })
       setSetupCode('')
     } catch (requestError) {
       setError(totpError(requestError, 'setup'))
@@ -100,7 +121,7 @@ export default function TotpSettings() {
     }
   }
 
-  async function copyText(text: string, kind: 'secret' | 'codes') {
+  async function copyText(text: string, kind: CopiedKind) {
     setError('')
     try {
       await navigator.clipboard.writeText(text)
@@ -170,21 +191,34 @@ export default function TotpSettings() {
         </div>
       ) : setup ? (
         <div className="totp-body">
-          <p className="totp-description">用验证器 App 扫描二维码，或手动输入密钥后，再输入 App 显示的 6 位验证码。</p>
+          <p className="totp-description">用验证器 App 扫描二维码；在手机上可点击下方按钮直接添加，或按下表手动输入。然后输入 App 显示的 6 位验证码。</p>
           <img className="totp-qr" src={setup.qrDataUrl} alt="两步验证二维码" />
-          <div className="totp-secret-row">
-            <code className="totp-secret">{setup.secret}</code>
-            <button className="secondary-small-button" type="button" onClick={() => void copyText(setup.secret, 'secret')}>
-              {copied === 'secret' ? '已复制' : '复制密钥'}
-            </button>
+          <div className="totp-open-row">
+            <a className="primary-small-button totp-open-link" href={setup.otpauthUrl}>在验证器 App 中打开</a>
+            <span className="totp-open-hint">手机上无法扫描本机二维码时，点这里直接添加</span>
           </div>
+          <table className="totp-params">
+            <tbody>
+              {totpParamRows(setup.secret, user?.username ?? '').map((row) => (
+                <tr key={row.key}>
+                  <th scope="row">{row.label}</th>
+                  <td><code className="totp-param-value">{row.display}</code></td>
+                  <td className="totp-param-copy">
+                    <button className="secondary-small-button" type="button" onClick={() => void copyText(row.value, row.key)}>
+                      {copied === row.key ? '已复制' : '复制'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
           <form className="password-form" onSubmit={(event) => void handleEnable(event)}>
             <label>6 位验证码
               <input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={setupCode} onChange={(event) => setSetupCode(event.target.value)} disabled={busy !== null} />
             </label>
             <div className="password-actions">
               <button className="primary-small-button" type="submit" disabled={busy !== null}>{busy === 'enable' ? '开启中…' : '确认开启'}</button>
-              <button className="secondary-small-button" type="button" onClick={() => { setSetup(null); setSetupCode(''); setError('') }} disabled={busy !== null}>取消</button>
+              <button className="secondary-small-button" type="button" onClick={() => { setSetup(null); setSetupCode(''); setError(''); setCopied(null) }} disabled={busy !== null}>取消</button>
             </div>
           </form>
         </div>

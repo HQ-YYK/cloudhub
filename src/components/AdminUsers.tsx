@@ -8,12 +8,13 @@ import {
   setUserDisabled,
   type AdminUser,
 } from '../api/admin'
+import { generateInitialPassword } from '../utils/initial-password'
 
 function errorMessage(error: unknown, action: 'load' | 'create' | 'reset' | 'disable' | 'totp') {
   if (error instanceof AdminRequestError) {
     if (error.code === 'username_taken') return '用户名已存在'
     if (error.code === 'invalid_request') return '用户名只能用 1~32 位字母、数字、`_ . -`'
-    if (error.code === 'weak_password') return '密码至少 12 位'
+    if (error.code === 'weak_password') return '初始密码至少 4 位'
     if (error.code === 'forbidden') return '没有权限'
   }
   return {
@@ -77,8 +78,8 @@ export default function AdminUsers() {
       setError('用户名只能用 1~32 位字母、数字、`_ . -`')
       return
     }
-    if (password.length < 12 || password.length > 256) {
-      setError('密码至少 12 位')
+    if (password.length < 4 || password.length > 256) {
+      setError('初始密码至少 4 位，对方首次登录后必须修改')
       return
     }
     setCreating(true)
@@ -86,7 +87,7 @@ export default function AdminUsers() {
       await createUser(username, password)
       setUsername('')
       setPassword('')
-      setSuccess('已创建，用户首次登录需修改密码')
+      setSuccess(`已创建 ${username}，对方首次登录需修改密码`)
       await loadUsers(true)
     } catch (requestError) {
       setError(errorMessage(requestError, 'create'))
@@ -110,15 +111,15 @@ export default function AdminUsers() {
   async function handleReset(user: AdminUser) {
     setError('')
     setSuccess('')
-    if (resetPassword.length < 12 || resetPassword.length > 256) {
-      setError('密码至少 12 位')
+    if (resetPassword.length < 4 || resetPassword.length > 256) {
+      setError('初始密码至少 4 位，对方首次登录后必须修改')
       return
     }
     try {
       await resetUserPassword(user.id, resetPassword)
       setResetPassword('')
       setResettingId(null)
-      setSuccess('已重置，对方需重新登录并修改密码')
+      setSuccess(`已重置 ${user.username} 的密码，对方需重新登录并修改密码`)
       await loadUsers(true)
     } catch (requestError) {
       setError(errorMessage(requestError, 'reset'))
@@ -156,7 +157,10 @@ export default function AdminUsers() {
           <input value={username} onChange={(event) => setUsername(event.target.value)} maxLength={32} disabled={creating} />
         </label>
         <label>初始密码
-          <input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} disabled={creating} />
+          <span className="admin-password-row">
+            <input type="text" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} disabled={creating} />
+            <button className="secondary-small-button" type="button" onClick={() => setPassword(generateInitialPassword())} disabled={creating}>生成</button>
+          </span>
         </label>
         <button className="primary-small-button" type="submit" disabled={creating}>{creating ? '创建中…' : '新建用户'}</button>
       </form>
@@ -196,7 +200,8 @@ export default function AdminUsers() {
                       )}
                       {resettingId === user.id && (
                         <div className="admin-reset-inline">
-                          <input type="password" autoComplete="new-password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} placeholder="新的临时密码" />
+                          <input type="text" autoComplete="new-password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} placeholder="新的临时密码" />
+                          <button className="secondary-small-button" type="button" onClick={() => setResetPassword(generateInitialPassword())}>生成</button>
                           <button className="primary-small-button" type="button" onClick={() => void handleReset(user)}>确认重置</button>
                         </div>
                       )}

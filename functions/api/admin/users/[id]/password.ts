@@ -1,6 +1,6 @@
 import type { PagesFunction } from '@cloudflare/workers-types'
 import type { AuthRepository } from '../../../../_lib/auth-repository.ts'
-import { getAuthenticatedUser, hashPassword } from '../../../../_lib/auth.ts'
+import { getAuthenticatedUser, hashPassword, MIN_INITIAL_PASSWORD_LENGTH } from '../../../../_lib/auth.ts'
 import { createD1AuthRepository } from '../../../../_lib/d1-auth-repository.ts'
 import type { AuthEnv } from '../../../../_lib/cloudflare-env.ts'
 import { jsonResponse, methodNotAllowed, sameOriginRequest } from '../../../../_lib/http.ts'
@@ -49,7 +49,7 @@ export function createAdminPasswordHandler(
       }
       if (
         typeof payload.password !== 'string'
-        || payload.password.length < 12
+        || payload.password.length < MIN_INITIAL_PASSWORD_LENGTH
         || payload.password.length > 256
       ) {
         return jsonResponse({ error: 'weak_password' }, 400)

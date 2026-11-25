@@ -137,7 +137,7 @@ test('admin can create a user without exposing password fields and rejects inval
     assert.equal(response.status, 201, username)
   }
 
-  response = await call(handler, 'POST', { username: 'alice', password: 'short' })
+  response = await call(handler, 'POST', { username: 'alice', password: 'abc' })
   assert.equal(response.status, 400)
   assert.deepEqual(await response.json(), { error: 'weak_password' })
 
@@ -159,6 +159,31 @@ test('admin can create a user without exposing password fields and rejects inval
   const listResponse = await call(handler, 'GET')
   const listBody = await listResponse.json() as { users: Array<Record<string, unknown>> }
   assert.ok(listBody.users.every((user) => !('password_hash' in user) && !('password_salt' in user)))
+})
+
+test('admin initial passwords allow 4 characters and reject 3', async () => {
+  const current = inMemoryRepository({
+    authenticated: {
+      id: adminId, username: 'root', password_hash: 'x', password_salt: 'x', password_iterations: 100000,
+      disabled: 0, role: 'admin', must_change_password: 0,
+    },
+  })
+  const create = createAdminUsersHandler({ createAuthRepository: () => current.repository })
+
+  let response = await call(create, 'POST', { username: 'xiao', password: 'abcd' })
+  assert.equal(response.status, 201)
+  const created = await response.json() as { user: { id: string } }
+  assert.equal(current.users.get(created.user.id)?.must_change_password, 1)
+
+  response = await call(create, 'POST', { username: 'miao', password: 'abc' })
+  assert.equal(response.status, 400)
+  assert.deepEqual(await response.json(), { error: 'weak_password' })
+
+  const reset = createAdminPasswordHandler({ createAuthRepository: () => current.repository })
+  response = await call(reset as never, 'POST', { password: 'abcd' }, { id: created.user.id })
+  assert.equal(response.status, 200)
+  assert.equal(current.passwordUpdates, 1)
+  assert.equal(current.users.get(created.user.id)?.must_change_password, 1)
 })
 
 test('admin can disable a user and reset password only for non-admin targets', async () => {
