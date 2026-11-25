@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { toDataURL } from 'qrcode'
 import { AuthRequestError, disableTotp, enableTotp, setupTotp } from '../api/auth'
 import { useAuth } from '../auth/useAuth'
+import { credentialFor } from '../auth/credential'
 
 type SetupState = {
   secret: string
@@ -108,7 +109,11 @@ export default function TotpSettings() {
     }
     setBusy('disable')
     try {
-      await disableTotp(disablePassword, disableCode)
+      const credential = await credentialFor(user?.username ?? '', disablePassword)
+      const totpCredential = 'password' in credential
+        ? { password: credential.password }
+        : { authKey: credential.authKey }
+      await disableTotp(totpCredential, disableCode)
       totpChanged(false)
       setDisableOpen(false)
       setDisablePassword('')
@@ -181,7 +186,7 @@ export default function TotpSettings() {
                 <input autoComplete="one-time-code" value={disableCode} onChange={(event) => setDisableCode(event.target.value)} disabled={busy !== null} />
               </label>
               <div className="password-actions">
-                <button className="danger-small-button" type="submit" disabled={busy !== null}>{busy === 'disable' ? '关闭中…' : '确认关闭'}</button>
+                <button className="danger-small-button" type="submit" disabled={busy !== null}>{busy === 'disable' ? '正在计算密钥…' : '确认关闭'}</button>
                 <button className="secondary-small-button" type="button" onClick={() => { setDisableOpen(false); setDisablePassword(''); setDisableCode('') }} disabled={busy !== null}>取消</button>
               </div>
             </form>

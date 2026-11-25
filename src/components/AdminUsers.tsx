@@ -8,13 +8,13 @@ import {
   setUserDisabled,
   type AdminUser,
 } from '../api/admin'
+import { deriveFromPassword, generateKdfSalt } from '../crypto'
 import { generateInitialPassword } from '../utils/initial-password'
 
 function errorMessage(error: unknown, action: 'load' | 'create' | 'reset' | 'disable' | 'totp') {
   if (error instanceof AdminRequestError) {
     if (error.code === 'username_taken') return '用户名已存在'
-    if (error.code === 'invalid_request') return '用户名只能用 1~32 位字母、数字、`_ . -`'
-    if (error.code === 'weak_password') return '初始密码至少 4 位'
+    if (error.code === 'invalid_request') return '请求格式不正确'
     if (error.code === 'forbidden') return '没有权限'
   }
   return {
@@ -37,6 +37,7 @@ export default function AdminUsers() {
   const [creating, setCreating] = useState(false)
   const [resettingId, setResettingId] = useState<string | null>(null)
   const [resetPassword, setResetPassword] = useState('')
+  const [resettingPassword, setResettingPassword] = useState(false)
   const [resettingTotpId, setResettingTotpId] = useState<string | null>(null)
 
   const loadUsers = useCallback(async (refresh = false) => {
@@ -79,15 +80,17 @@ export default function AdminUsers() {
       return
     }
     if (password.length < 4 || password.length > 256) {
-      setError('初始密码至少 4 位，对方首次登录后必须修改')
+      setError('临时密码需 4~256 位')
       return
     }
     setCreating(true)
     try {
-      await createUser(username, password)
+      const kdfSalt = generateKdfSalt()
+      const derived = await deriveFromPassword(password, kdfSalt)
+      await createUser(username, kdfSalt, derived.authKey)
       setUsername('')
       setPassword('')
-      setSuccess(`已创建 ${username}，对方首次登录需修改密码`)
+      setSuccess('请把用户名和临时密码告诉对方。对方首次登录会设置自己的密码和恢复码。')
       await loadUsers(true)
     } catch (requestError) {
       setError(errorMessage(requestError, 'create'))
@@ -112,17 +115,23 @@ export default function AdminUsers() {
     setError('')
     setSuccess('')
     if (resetPassword.length < 4 || resetPassword.length > 256) {
-      setError('初始密码至少 4 位，对方首次登录后必须修改')
+      setError('临时密码需 4~256 位')
       return
     }
+    if (!window.confirm('重置后对方需要用自己的恢复码才能打开旧文件；如果对方没有恢复码，旧文件将永久无法打开。确定重置吗？')) return
+    setResettingPassword(true)
     try {
-      await resetUserPassword(user.id, resetPassword)
+      const kdfSalt = generateKdfSalt()
+      const derived = await deriveFromPassword(resetPassword, kdfSalt)
+      await resetUserPassword(user.id, kdfSalt, derived.authKey)
       setResetPassword('')
       setResettingId(null)
-      setSuccess(`已重置 ${user.username} 的密码，对方需重新登录并修改密码`)
+      setSuccess(`已重置 ${user.username} 的密码，对方需重新登录`)
       await loadUsers(true)
     } catch (requestError) {
       setError(errorMessage(requestError, 'reset'))
+    } finally {
+      setResettingPassword(false)
     }
   }
 
@@ -162,7 +171,7 @@ export default function AdminUsers() {
             <button className="secondary-small-button" type="button" onClick={() => setPassword(generateInitialPassword())} disabled={creating}>生成</button>
           </span>
         </label>
-        <button className="primary-small-button" type="submit" disabled={creating}>{creating ? '创建中…' : '新建用户'}</button>
+        <button className="primary-small-button" type="submit" disabled={creating}>{creating ? '正在计算密钥…' : '新建用户'}</button>
       </form>
       {error && <p className="form-error" role="alert">{error}</p>}
       {success && <p className="account-success" role="status">{success}</p>}
@@ -200,9 +209,11 @@ export default function AdminUsers() {
                       )}
                       {resettingId === user.id && (
                         <div className="admin-reset-inline">
-                          <input type="text" autoComplete="new-password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} placeholder="新的临时密码" />
-                          <button className="secondary-small-button" type="button" onClick={() => setResetPassword(generateInitialPassword())}>生成</button>
-                          <button className="primary-small-button" type="button" onClick={() => void handleReset(user)}>确认重置</button>
+                          <input type="text" autoComplete="new-password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} placeholder="新的临时密码" disabled={resettingPassword} />
+                          <button className="secondary-small-button" type="button" onClick={() => setResetPassword(generateInitialPassword())} disabled={resettingPassword}>生成</button>
+                          <button className="primary-small-button" type="button" onClick={() => void handleReset(user)} disabled={resettingPassword}>
+                            {resettingPassword ? '正在计算密钥…' : '确认重置'}
+                          </button>
                         </div>
                       )}
                     </td>
