@@ -4,11 +4,12 @@ import {
   createUser,
   listUsers,
   resetUserPassword,
+  resetUserTotp,
   setUserDisabled,
   type AdminUser,
 } from '../api/admin'
 
-function errorMessage(error: unknown, action: 'load' | 'create' | 'reset' | 'disable') {
+function errorMessage(error: unknown, action: 'load' | 'create' | 'reset' | 'disable' | 'totp') {
   if (error instanceof AdminRequestError) {
     if (error.code === 'username_taken') return '用户名已存在'
     if (error.code === 'invalid_request') return '用户名只能用 1~32 位字母、数字、`_ . -`'
@@ -20,6 +21,7 @@ function errorMessage(error: unknown, action: 'load' | 'create' | 'reset' | 'dis
     create: '新建用户失败，请稍后重试',
     reset: '重置密码失败，请稍后重试',
     disable: '修改用户状态失败，请稍后重试',
+    totp: '重置两步验证失败，请稍后重试',
   }[action]
 }
 
@@ -34,6 +36,7 @@ export default function AdminUsers() {
   const [creating, setCreating] = useState(false)
   const [resettingId, setResettingId] = useState<string | null>(null)
   const [resetPassword, setResetPassword] = useState('')
+  const [resettingTotpId, setResettingTotpId] = useState<string | null>(null)
 
   const loadUsers = useCallback(async (refresh = false) => {
     if (refresh) setRefreshing(true)
@@ -122,6 +125,21 @@ export default function AdminUsers() {
     }
   }
 
+  async function handleResetTotp(user: AdminUser) {
+    setError('')
+    setSuccess('')
+    if (!window.confirm('重置后该用户将失去两步验证保护，且需要重新登录，确定重置吗？')) return
+    setResettingTotpId(user.id)
+    try {
+      await resetUserTotp(user.id)
+      setSuccess('已重置，该用户需重新登录')
+    } catch (requestError) {
+      setError(errorMessage(requestError, 'totp'))
+    } finally {
+      setResettingTotpId(null)
+    }
+  }
+
   return (
     <section className="admin-users">
       <div className="admin-users-toolbar">
@@ -171,6 +189,9 @@ export default function AdminUsers() {
                             setResettingId(resettingId === user.id ? null : user.id)
                             setResetPassword('')
                           }}>重置密码</button>
+                          <button className="secondary-small-button" type="button" onClick={() => void handleResetTotp(user)} disabled={resettingTotpId === user.id}>
+                            {resettingTotpId === user.id ? '重置中…' : '重置两步验证'}
+                          </button>
                         </div>
                       )}
                       {resettingId === user.id && (

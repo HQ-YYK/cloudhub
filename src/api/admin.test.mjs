@@ -4,6 +4,7 @@ import {
   createUser,
   listUsers,
   resetUserPassword,
+  resetUserTotp,
   setUserDisabled,
 } from './admin.ts'
 
@@ -79,6 +80,22 @@ test('resetUserPassword uses POST and encoded id', async () => {
     assert.equal(request.input, '/api/admin/users/user%2Fid/password')
     assert.equal(request.init.method, 'POST')
     assert.deepEqual(JSON.parse(request.init.body), { password: 'temporary-password' })
+  } finally {
+    restore()
+  }
+})
+
+test('resetUserTotp uses POST and encoded id', async () => {
+  let request
+  const restore = mockFetch(
+    new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } }),
+    (input, init) => { request = { input, init } },
+  )
+  try {
+    await resetUserTotp('user/id')
+    assert.equal(request.input, '/api/admin/users/user%2Fid/totp/reset')
+    assert.equal(request.init.method, 'POST')
+    assert.equal(request.init.body, undefined)
   } finally {
     restore()
   }
