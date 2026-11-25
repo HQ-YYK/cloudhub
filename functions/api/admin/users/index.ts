@@ -1,9 +1,10 @@
 import type { PagesFunction } from '@cloudflare/workers-types'
 import { AuthRepositoryConflictError, type AuthRepository } from '../../../_lib/auth-repository.ts'
-import { getAuthenticatedUser, hashPassword, MIN_INITIAL_PASSWORD_LENGTH } from '../../../_lib/auth.ts'
+import { getAuthenticatedUser, hashPassword } from '../../../_lib/auth.ts'
 import { createD1AuthRepository } from '../../../_lib/d1-auth-repository.ts'
 import type { AuthEnv } from '../../../_lib/cloudflare-env.ts'
 import { jsonResponse, methodNotAllowed, sameOriginRequest } from '../../../_lib/http.ts'
+import { isValidAuthKey, isValidKdfSalt, KDF_ITERATIONS } from '../../../_lib/keys.ts'
 
 interface AdminUsersDependencies {
   createAuthRepository: (env: AuthEnv) => AuthRepository
@@ -41,7 +42,7 @@ export function createAdminUsersHandler(
         return jsonResponse({ users: await repository.listUsers() })
       }
 
-      let payload: { username?: unknown, password?: unknown }
+      let payload: { username?: unknown, kdfSalt?: unknown, authKey?: unknown }
       try {
         const body = await context.request.text()
         if (body.length > 2048) return jsonResponse({ error: 'invalid_request' }, 400)
@@ -52,18 +53,13 @@ export function createAdminUsersHandler(
       if (
         typeof payload.username !== 'string'
         || !/^[A-Za-z0-9_.-]{1,32}$/u.test(payload.username)
+        || !isValidKdfSalt(payload.kdfSalt)
+        || !isValidAuthKey(payload.authKey)
       ) {
         return jsonResponse({ error: 'invalid_request' }, 400)
       }
-      if (
-        typeof payload.password !== 'string'
-        || payload.password.length < MIN_INITIAL_PASSWORD_LENGTH
-        || payload.password.length > 256
-      ) {
-        return jsonResponse({ error: 'weak_password' }, 400)
-      }
 
-      const password = await hashPassword(payload.password)
+      const password = await hashPassword(payload.authKey)
       const timestamp = new Date().toISOString()
       const created = await repository.createUser({
         id: crypto.randomUUID(),
@@ -71,6 +67,8 @@ export function createAdminUsersHandler(
         passwordHash: password.hash,
         passwordSalt: password.salt,
         passwordIterations: password.iterations,
+        kdfSalt: payload.kdfSalt,
+        kdfIterations: KDF_ITERATIONS,
         role: 'user',
         mustChangePassword: 1,
         createdAt: timestamp,

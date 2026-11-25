@@ -10,6 +10,27 @@ import { createAdminPasswordHandler } from '../api/admin/users/[id]/password.ts'
 
 const adminId = '11111111-1111-4111-8111-111111111111'
 const userId = '22222222-2222-4222-8222-222222222222'
+const kdfSalt = Buffer.alloc(16, 1).toString('base64url')
+const authKey = Buffer.alloc(32, 2).toString('base64url')
+
+function stored(overrides: Partial<StoredUser> = {}): StoredUser {
+  return {
+    id: adminId,
+    username: 'root',
+    password_hash: 'x',
+    password_salt: 'x',
+    password_iterations: 100000,
+    disabled: 0,
+    role: 'admin',
+    must_change_password: 0,
+    kdf_salt: null,
+    kdf_iterations: null,
+    wrapped_master_key: null,
+    recovery_wrapped_key: null,
+    keys_updated_at: null,
+    ...overrides,
+  }
+}
 
 function inMemoryRepository(options: {
   authenticated?: StoredUser | null
@@ -58,7 +79,7 @@ function inMemoryRepository(options: {
       users.set(user.id, user)
       return user
     },
-    updatePassword: async (id, _hash, _salt, _iterations, mustChangePassword, updatedAt) => {
+    updatePassword: async (id, _hash, _salt, _iterations, _kdfSalt, _kdfIterations, mustChangePassword, updatedAt) => {
       passwordUpdates += 1
       const user = users.get(id)
       if (user) users.set(id, { ...user, must_change_password: mustChangePassword, updated_at: updatedAt })
@@ -98,61 +119,52 @@ test('admin users enforces authentication and admin role', async () => {
   assert.equal(response.status, 401)
 
   const ordinary = inMemoryRepository({
-    authenticated: {
-      id: userId, username: 'alice', password_hash: 'x', password_salt: 'x', password_iterations: 100000,
-      disabled: 0, role: 'user', must_change_password: 0,
-    },
+    authenticated: stored({ id: userId, username: 'alice', role: 'user' }),
   })
   response = await call(createAdminUsersHandler({ createAuthRepository: () => ordinary.repository }), 'GET')
   assert.equal(response.status, 403)
 
   const pendingAdmin = inMemoryRepository({
-    authenticated: {
-      id: adminId, username: 'root', password_hash: 'x', password_salt: 'x', password_iterations: 100000,
-      disabled: 0, role: 'admin', must_change_password: 1,
-    },
+    authenticated: stored({ must_change_password: 1 }),
   })
   response = await call(createAdminUsersHandler({ createAuthRepository: () => pendingAdmin.repository }), 'GET')
   assert.equal(response.status, 403)
 })
 
 test('admin can create a user without exposing password fields and rejects invalid or duplicate users', async () => {
-  const current = inMemoryRepository({
-    authenticated: {
-      id: adminId, username: 'root', password_hash: 'x', password_salt: 'x', password_iterations: 100000,
-      disabled: 0, role: 'admin', must_change_password: 0,
-    },
-  })
+  const current = inMemoryRepository({ authenticated: stored() })
   const handler = createAdminUsersHandler({ createAuthRepository: () => current.repository })
 
-  let response = await call(handler, 'POST', { username: 'bad name', password: 'twelvechars12' })
+  let response = await call(handler, 'POST', { username: 'bad name', kdfSalt, authKey })
   assert.equal(response.status, 400)
   assert.deepEqual(await response.json(), { error: 'invalid_request' })
 
-  response = await call(handler, 'POST', { username: 'a'.repeat(33), password: 'twelvechars12' })
+  response = await call(handler, 'POST', { username: 'a'.repeat(33), kdfSalt, authKey })
   assert.equal(response.status, 400)
 
   for (const username of ['f', 'fu', 'xiao']) {
-    response = await call(handler, 'POST', { username, password: 'twelvechars12' })
+    response = await call(handler, 'POST', { username, kdfSalt, authKey })
     assert.equal(response.status, 201, username)
   }
 
-  response = await call(handler, 'POST', { username: 'alice', password: 'abc' })
+  response = await call(handler, 'POST', { username: 'alice', kdfSalt: 'bad', authKey })
   assert.equal(response.status, 400)
-  assert.deepEqual(await response.json(), { error: 'weak_password' })
+  assert.deepEqual(await response.json(), { error: 'invalid_request' })
 
-  response = await call(handler, 'POST', { username: 'alice', password: 'twelvechars12' })
+  response = await call(handler, 'POST', { username: 'alice', password: 'legacy-password' })
+  assert.equal(response.status, 400)
+  assert.deepEqual(await response.json(), { error: 'invalid_request' })
+
+  response = await call(handler, 'POST', { username: 'alice', kdfSalt, authKey })
   assert.equal(response.status, 201)
   const body = await response.json() as { user: Record<string, unknown> }
   assert.equal(body.user.must_change_password, 1)
   assert.equal('password_hash' in body.user, false)
   assert.equal('password_salt' in body.user, false)
+  assert.equal('kdf_salt' in body.user, false)
 
-  const duplicate = inMemoryRepository({ duplicate: true, authenticated: {
-    id: adminId, username: 'root', password_hash: 'x', password_salt: 'x', password_iterations: 100000,
-    disabled: 0, role: 'admin', must_change_password: 0,
-  } })
-  response = await call(createAdminUsersHandler({ createAuthRepository: () => duplicate.repository }), 'POST', { username: 'alice', password: 'twelvechars12' })
+  const duplicate = inMemoryRepository({ duplicate: true, authenticated: stored() })
+  response = await call(createAdminUsersHandler({ createAuthRepository: () => duplicate.repository }), 'POST', { username: 'alice', kdfSalt, authKey })
   assert.equal(response.status, 409)
   assert.deepEqual(await response.json(), { error: 'username_taken' })
 
@@ -161,26 +173,21 @@ test('admin can create a user without exposing password fields and rejects inval
   assert.ok(listBody.users.every((user) => !('password_hash' in user) && !('password_salt' in user)))
 })
 
-test('admin initial passwords allow 4 characters and reject 3', async () => {
-  const current = inMemoryRepository({
-    authenticated: {
-      id: adminId, username: 'root', password_hash: 'x', password_salt: 'x', password_iterations: 100000,
-      disabled: 0, role: 'admin', must_change_password: 0,
-    },
-  })
+test('admin create and password reset require a valid kdf salt and auth key', async () => {
+  const current = inMemoryRepository({ authenticated: stored() })
   const create = createAdminUsersHandler({ createAuthRepository: () => current.repository })
 
-  let response = await call(create, 'POST', { username: 'xiao', password: 'abcd' })
+  let response = await call(create, 'POST', { username: 'xiao', kdfSalt, authKey })
   assert.equal(response.status, 201)
   const created = await response.json() as { user: { id: string } }
   assert.equal(current.users.get(created.user.id)?.must_change_password, 1)
 
-  response = await call(create, 'POST', { username: 'miao', password: 'abc' })
+  response = await call(create, 'POST', { username: 'miao', kdfSalt: 'bad', authKey })
   assert.equal(response.status, 400)
-  assert.deepEqual(await response.json(), { error: 'weak_password' })
+  assert.deepEqual(await response.json(), { error: 'invalid_request' })
 
   const reset = createAdminPasswordHandler({ createAuthRepository: () => current.repository })
-  response = await call(reset as never, 'POST', { password: 'abcd' }, { id: created.user.id })
+  response = await call(reset as never, 'POST', { kdfSalt, authKey }, { id: created.user.id })
   assert.equal(response.status, 200)
   assert.equal(current.passwordUpdates, 1)
   assert.equal(current.users.get(created.user.id)?.must_change_password, 1)
@@ -192,10 +199,7 @@ test('admin can disable a user and reset password only for non-admin targets', a
     must_change_password: 0, created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z',
   }
   const current = inMemoryRepository({
-    authenticated: {
-      id: adminId, username: 'root', password_hash: 'x', password_salt: 'x', password_iterations: 100000,
-      disabled: 0, role: 'admin', must_change_password: 0,
-    },
+    authenticated: stored(),
     users: [target],
   })
 
@@ -208,20 +212,16 @@ test('admin can disable a user and reset password only for non-admin targets', a
   assert.equal(response.status, 404)
 
   const reset = createAdminPasswordHandler({ createAuthRepository: () => current.repository })
-  response = await call(reset as never, 'POST', { password: 'twelvechars12' }, { id: userId })
+  response = await call(reset as never, 'POST', { kdfSalt, authKey }, { id: userId })
   assert.equal(response.status, 200)
   assert.equal(current.passwordUpdates, 1)
   assert.equal(current.users.get(userId)?.must_change_password, 1)
   assert.deepEqual(current.revoked, [userId, userId])
 
   const adminTarget = inMemoryRepository({
-    authenticated: {
-      id: adminId, username: 'root', password_hash: 'x', password_salt: 'x', password_iterations: 100000,
-      disabled: 0, role: 'admin', must_change_password: 0,
-    },
+    authenticated: stored(),
     users: [{ ...target, id: adminId, username: 'root', role: 'admin' }],
   })
-  response = await call(createAdminPasswordHandler({ createAuthRepository: () => adminTarget.repository }) as never, 'POST', { password: 'twelvechars12' }, { id: adminId })
+  response = await call(createAdminPasswordHandler({ createAuthRepository: () => adminTarget.repository }) as never, 'POST', { kdfSalt, authKey }, { id: adminId })
   assert.equal(response.status, 403)
 })
-
