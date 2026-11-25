@@ -47,6 +47,7 @@ export function buildUploadService(env: AuthEnv, dependencies: UploadDependencie
   const storageRepository = dependencies.createStorageRepository(env)
   const fileRepository = dependencies.createFileRepository(env)
   return createUploadService({
+    env,
     authRepository: dependencies.createAuthRepository(env),
     fileRepository,
     uploadRepository: fileRepository,
@@ -70,6 +71,14 @@ export function uploadErrorResponse(error: UploadServiceError) {
   if (error.code === 'size_mismatch') return jsonResponse({ error: 'storage_unavailable' }, 502)
   if (error.code === 'storage_not_connected') return jsonResponse({ error: 'storage_not_connected' }, 503)
   if (error.code === 'storage_not_configured') return jsonResponse({ error: 'storage_not_configured' }, 503)
+  if (error.code === 'storage_reauth_required') return jsonResponse({ error: 'storage_reauth_required' }, 503)
+  if (error.code === 'storage_full') {
+    return jsonResponse({
+      error: 'storage_full',
+      required: error.required,
+      largestAvailable: error.largestAvailable,
+    }, 507)
+  }
   if (error.code === 'storage_unavailable') return jsonResponse({ error: 'storage_unavailable' }, 503)
   return jsonResponse({ error: error.code }, 400)
 }

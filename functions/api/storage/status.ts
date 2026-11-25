@@ -4,9 +4,10 @@ import { createD1AuthRepository } from '../../_lib/d1-auth-repository.ts'
 import type { AuthEnv } from '../../_lib/cloudflare-env.ts'
 import { createD1StorageRepository } from '../../_lib/d1-storage-repository.ts'
 import { jsonResponse, methodNotAllowed } from '../../_lib/http.ts'
+import type { StorageRepository } from '../../_lib/storage-repository.ts'
 
 export function createStorageStatusHandler(
-  overrides: Partial<{ createAuthRepository: (env: AuthEnv) => ReturnType<typeof createD1AuthRepository>, createStorageRepository: (env: AuthEnv) => ReturnType<typeof createD1StorageRepository> }> = {},
+  overrides: Partial<{ createAuthRepository: (env: AuthEnv) => ReturnType<typeof createD1AuthRepository>, createStorageRepository: (env: AuthEnv) => StorageRepository }> = {},
 ): PagesFunction<AuthEnv> {
   const dependencies = {
     createAuthRepository: (env: AuthEnv) => {
@@ -30,11 +31,10 @@ export function createStorageStatusHandler(
       if (user.role !== 'admin' || user.mustChangePassword) {
         return jsonResponse({ error: 'forbidden' }, 403)
       }
-      const account = await dependencies.createStorageRepository(context.env).getAccount()
+      const accounts = await dependencies.createStorageRepository(context.env).listAccounts()
       return jsonResponse({
-        connected: Boolean(account),
-        email: account?.google_email ?? null,
-        connectedAt: account?.created_at ?? null,
+        connected: accounts.some((account) => account.status === 'active'),
+        accountCount: accounts.length,
       })
     } catch (error) {
       console.error('Storage status failed', error instanceof Error ? error.name : 'unknown_error')

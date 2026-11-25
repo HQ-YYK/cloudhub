@@ -14,7 +14,7 @@ import { contentRange, parseByteRange, unsatisfiedContentRange } from '../../../
 interface DownloadDependencies {
   createAuthRepository: (env: AuthEnv) => AuthRepository
   createFileRepository: (env: AuthEnv) => FileRepository
-  createBlobStore: (env: AuthEnv) => BlobStore
+  createBlobStore: (env: AuthEnv, accountId: number) => BlobStore
 }
 
 function invalidFileIdResponse() {
@@ -37,7 +37,7 @@ export function createDownloadHandler(
       if (!env.DB) throw new Error('database_configuration_missing')
       return createD1FileRepository(env.DB)
     },
-    createBlobStore: createProductionBlobStore,
+    createBlobStore: (env, accountId) => createProductionBlobStore(env, accountId),
     ...overrides,
   }
 
@@ -78,7 +78,7 @@ export function createDownloadHandler(
         return jsonResponse({ error: 'not_found' }, 404)
       }
 
-      const blobStore = dependencies.createBlobStore(context.env)
+      const blobStore = dependencies.createBlobStore(context.env, record.storage_account_id ?? 1)
       const rangeResult = parseByteRange(context.request.headers.get('Range'), sizeBytes)
       if (rangeResult.kind === 'not-satisfiable') {
         return new Response(null, {
