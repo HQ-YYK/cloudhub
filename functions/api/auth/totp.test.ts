@@ -28,6 +28,9 @@ import { createVerifyTotpHandler } from './totp/verify.ts'
 const userId = '11111111-1111-4111-8111-111111111111'
 const adminId = '22222222-2222-4222-8222-222222222222'
 const encryptionKey = Buffer.from('1'.repeat(32), 'ascii').toString('base64url')
+const authKey = Buffer.alloc(32, 2).toString('base64url')
+const wrongAuthKey = Buffer.alloc(32, 8).toString('base64url')
+const kdfSalt = Buffer.alloc(16, 1).toString('base64url')
 const sessionUser: SessionUser = {
   session_id: 'session-1',
   id: userId,
@@ -263,8 +266,8 @@ async function pendingUser() {
   return { secret, user }
 }
 
-async function storedUser(password: string) {
-  const hash = await hashPassword(password)
+async function storedUser(key: string) {
+  const hash = await hashPassword(key)
   const stored: StoredUser = {
     id: userId,
     username: 'alice',
@@ -274,8 +277,8 @@ async function storedUser(password: string) {
     disabled: 0,
     role: 'user',
     must_change_password: 0,
-    kdf_salt: null,
-    kdf_iterations: null,
+    kdf_salt: kdfSalt,
+    kdf_iterations: 600000,
     wrapped_master_key: null,
     recovery_wrapped_key: null,
     keys_updated_at: null,
@@ -296,7 +299,7 @@ function adminTarget(role: 'admin' | 'user' = 'user'): UserSummary {
 }
 
 test('login returns a challenge instead of a session when TOTP is enabled', async () => {
-  const stored = await storedUser('correct-password')
+  const stored = await storedUser(authKey)
   const { user } = await enabledUser()
   const auth = authRepository({ stored })
   const totp = totpRepository(user)
@@ -306,7 +309,7 @@ test('login returns a challenge instead of a session when TOTP is enabled', asyn
   })
 
   const response = await handler({
-    request: originRequest('/api/auth/login', 'POST', { username: 'alice', password: 'correct-password' }),
+    request: originRequest('/api/auth/login', 'POST', { username: 'alice', authKey }),
     env: { DB: {} as D1Database },
   } as never)
 
@@ -323,7 +326,7 @@ test('login returns a challenge instead of a session when TOTP is enabled', asyn
 })
 
 test('login still issues a session when TOTP is not enabled', async () => {
-  const stored = await storedUser('correct-password')
+  const stored = await storedUser(authKey)
   const auth = authRepository({ stored })
   const totp = totpRepository(plainUser())
   const handler = createLoginHandler({
@@ -332,7 +335,7 @@ test('login still issues a session when TOTP is not enabled', async () => {
   })
 
   const response = await handler({
-    request: originRequest('/api/auth/login', 'POST', { username: 'alice', password: 'correct-password' }),
+    request: originRequest('/api/auth/login', 'POST', { username: 'alice', authKey }),
     env: { DB: {} as D1Database },
   } as never)
 
@@ -371,7 +374,7 @@ test('verify accepts a valid code, deletes the challenge, and issues a session',
 
   assert.equal(response.status, 200)
   const body = await response.json() as { user: Record<string, unknown> }
-  assert.deepEqual(body.user, { id: userId, username: 'alice', role: 'user', mustChangePassword: false, legacy: true, keysReady: false })
+  assert.deepEqual(body.user, { id: userId, username: 'alice', role: 'user', mustChangePassword: false, keysReady: false })
   assert.match(response.headers.get('Set-Cookie') ?? '', /^cloudhub_session=/)
   assert.ok(totp.deletedChallenges.includes(tokenHash))
   assert.equal(auth.sessions.length, 1)
@@ -624,9 +627,9 @@ test('enable rejects a wrong code without enabling TOTP', async () => {
   assert.equal(totp.recoveryCodes.length, 0)
 })
 
-test('disable requires the password and a valid code, then clears TOTP and recovery codes', async () => {
+test('disable requires the auth key and a valid code, then clears TOTP and recovery codes', async () => {
   const { secret, user } = await enabledUser()
-  const stored = await storedUser('correct-password')
+  const stored = await storedUser(authKey)
   const auth = authRepository({ stored, sessionUser })
   const totp = totpRepository(user)
   const handler = createTotpDisableHandler({
@@ -637,7 +640,7 @@ test('disable requires the password and a valid code, then clears TOTP and recov
   const step = Math.floor(Date.now() / 1000 / 30)
   const code = await totpCode(base32Decode(secret), step, TOTP_DIGITS)
   const response = await handler({
-    request: originRequest('/api/auth/totp/disable', 'POST', { password: 'correct-password', code }, 'cloudhub_session=test-token'),
+    request: originRequest('/api/auth/totp/disable', 'POST', { authKey, code }, 'cloudhub_session=test-token'),
     env: verifyEnv(),
   } as never)
 
@@ -647,9 +650,9 @@ test('disable requires the password and a valid code, then clears TOTP and recov
   assert.deepEqual(totp.deletedRecoveryUsers, [userId])
 })
 
-test('disable rejects a wrong password and records a login failure', async () => {
+test('disable rejects a wrong auth key and records a login failure', async () => {
   const { user } = await enabledUser()
-  const stored = await storedUser('correct-password')
+  const stored = await storedUser(authKey)
   const auth = authRepository({ stored, sessionUser })
   const totp = totpRepository(user)
   const handler = createTotpDisableHandler({
@@ -658,7 +661,7 @@ test('disable rejects a wrong password and records a login failure', async () =>
   })
 
   const response = await handler({
-    request: originRequest('/api/auth/totp/disable', 'POST', { password: 'wrong-password', code: '123456' }, 'cloudhub_session=test-token'),
+    request: originRequest('/api/auth/totp/disable', 'POST', { authKey: wrongAuthKey, code: '123456' }, 'cloudhub_session=test-token'),
     env: verifyEnv(),
   } as never)
 
@@ -667,9 +670,9 @@ test('disable rejects a wrong password and records a login failure', async () =>
   assert.equal(auth.loginFailures.length, 1)
 })
 
-test('disable rejects a wrong code after a correct password', async () => {
+test('disable rejects a wrong code after a correct auth key', async () => {
   const { secret, user } = await enabledUser()
-  const stored = await storedUser('correct-password')
+  const stored = await storedUser(authKey)
   const auth = authRepository({ stored, sessionUser })
   const totp = totpRepository(user)
   const handler = createTotpDisableHandler({
@@ -679,7 +682,7 @@ test('disable rejects a wrong code after a correct password', async () => {
 
   const stale = await totpCode(base32Decode(secret), 1, TOTP_DIGITS)
   const response = await handler({
-    request: originRequest('/api/auth/totp/disable', 'POST', { password: 'correct-password', code: stale }, 'cloudhub_session=test-token'),
+    request: originRequest('/api/auth/totp/disable', 'POST', { authKey, code: stale }, 'cloudhub_session=test-token'),
     env: verifyEnv(),
   } as never)
 
@@ -738,7 +741,7 @@ test('TOTP management requires an authenticated user', async () => {
 
   assert.equal((await setup({ request: originRequest('/api/auth/totp/setup', 'POST'), env: verifyEnv() } as never)).status, 401)
   assert.equal((await enable({ request: originRequest('/api/auth/totp/enable', 'POST', { code: '123456' }), env: verifyEnv() } as never)).status, 401)
-  assert.equal((await disable({ request: originRequest('/api/auth/totp/disable', 'POST', { password: 'password', code: '123456' }), env: verifyEnv() } as never)).status, 401)
+  assert.equal((await disable({ request: originRequest('/api/auth/totp/disable', 'POST', { authKey, code: '123456' }), env: verifyEnv() } as never)).status, 401)
   assert.equal((await reset({ request: originRequest(`/api/admin/users/${userId}/totp/reset`, 'POST'), env: verifyEnv(), params: { id: userId } } as never)).status, 401)
 })
 

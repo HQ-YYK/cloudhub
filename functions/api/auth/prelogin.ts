@@ -52,19 +52,13 @@ export function createPreloginHandler(
 
       if (user && user.disabled === 0 && user.kdf_salt !== null) {
         return jsonResponse({
-          legacy: false,
           kdfSalt: user.kdf_salt,
           kdfIterations: user.kdf_iterations ?? KDF_ITERATIONS,
         })
       }
 
-      if (user && user.disabled === 0) {
-        return jsonResponse({ legacy: true })
-      }
-
       const fakeSalt = await deriveFakeSalt(context.env.STORAGE_ENCRYPTION_KEY, payload.username)
       return jsonResponse({
-        legacy: false,
         kdfSalt: fakeSalt,
         kdfIterations: KDF_ITERATIONS,
       })

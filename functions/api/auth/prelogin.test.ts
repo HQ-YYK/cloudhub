@@ -67,15 +67,20 @@ test('prelogin returns real kdf parameters for a new-format account', async () =
 
   const response = await handler({ request: originRequest('alice'), env: env() } as never)
   assert.equal(response.status, 200)
-  assert.deepEqual(await response.json(), { legacy: false, kdfSalt, kdfIterations: 600000 })
+  assert.deepEqual(await response.json(), { kdfSalt, kdfIterations: 600000 })
 })
 
-test('prelogin marks a legacy account', async () => {
+test('prelogin returns a deterministic fake salt for a kdf_salt NULL account', async () => {
   const handler = createPreloginHandler({ createAuthRepository: () => repository(stored()) })
 
-  const response = await handler({ request: originRequest('alice'), env: env() } as never)
-  assert.equal(response.status, 200)
-  assert.deepEqual(await response.json(), { legacy: true })
+  const first = await handler({ request: originRequest('alice'), env: env() } as never)
+  const second = await handler({ request: originRequest('alice'), env: env() } as never)
+
+  assert.equal(first.status, 200)
+  const firstBody = await first.json() as { kdfSalt: string; kdfIterations: number }
+  assert.equal(firstBody.kdfIterations, 600000)
+  assert.equal(isValidKdfSalt(firstBody.kdfSalt), true)
+  assert.deepEqual(await second.json(), firstBody)
 })
 
 test('prelogin returns a deterministic fake salt for unknown users', async () => {
@@ -86,8 +91,7 @@ test('prelogin returns a deterministic fake salt for unknown users', async () =>
   const other = await handler({ request: originRequest('bob'), env: env() } as never)
 
   assert.equal(first.status, 200)
-  const firstBody = await first.json() as { legacy: boolean; kdfSalt: string; kdfIterations: number }
-  assert.equal(firstBody.legacy, false)
+  const firstBody = await first.json() as { kdfSalt: string; kdfIterations: number }
   assert.equal(firstBody.kdfIterations, 600000)
   assert.equal(isValidKdfSalt(firstBody.kdfSalt), true)
   assert.deepEqual(await second.json(), firstBody)
@@ -101,8 +105,7 @@ test('prelogin treats a disabled account like an unknown user', async () => {
 
   const response = await handler({ request: originRequest('alice'), env: env() } as never)
   assert.equal(response.status, 200)
-  const body = await response.json() as { legacy: boolean; kdfSalt: string; kdfIterations: number }
-  assert.equal(body.legacy, false)
+  const body = await response.json() as { kdfSalt: string; kdfIterations: number }
   assert.equal(body.kdfIterations, 600000)
   assert.notEqual(body.kdfSalt, kdfSalt)
 })
