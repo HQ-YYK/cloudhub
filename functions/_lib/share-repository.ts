@@ -19,6 +19,7 @@ export interface ShareWithFileRecord extends ShareRecord {
   file_deleted_at: string | null
   file_storage_status: string
   file_kind: string
+  file_storage_account_id: number | null
 }
 
 export interface ShareFileInfo {

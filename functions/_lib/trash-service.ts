@@ -33,9 +33,9 @@ export class TrashServiceError extends Error {
 }
 
 export interface TrashDriveClient {
-  untrash(id: string): Promise<void>
-  deletePermanently(id: string): Promise<void>
-  trash(id: string): Promise<void>
+  untrash(id: string, accountId?: number): Promise<void>
+  deletePermanently(id: string, accountId?: number): Promise<void>
+  trash(id: string, accountId?: number): Promise<void>
 }
 
 interface AuthenticatedUser {
@@ -78,7 +78,7 @@ export function createTrashService(deps: TrashServiceDeps) {
     )
     for (const record of expiredLive) {
       try {
-        await deps.driveClient.deletePermanently(record.object_key)
+        await deps.driveClient.deletePermanently(record.object_key, record.storage_account_id ?? 1)
       } catch (error) {
         if (!(error instanceof BlobStoreError && error.code === 'not_found')) break
       }
@@ -105,7 +105,7 @@ export function createTrashService(deps: TrashServiceDeps) {
     }
 
     try {
-      await deps.driveClient.untrash(item.object_key)
+      await deps.driveClient.untrash(item.object_key, item.storage_account_id ?? 1)
     } catch (error) {
       if (error instanceof BlobStoreError && error.code === 'not_found') {
         await markPurged(user.id, fileId)
@@ -120,7 +120,7 @@ export function createTrashService(deps: TrashServiceDeps) {
     } catch (error) {
       if (error instanceof FileRepositoryConflictError) {
         try {
-          await deps.driveClient.trash(item.object_key)
+          await deps.driveClient.trash(item.object_key, item.storage_account_id ?? 1)
         } catch {
           // Best-effort re-trash after a concurrent same-name restore race.
         }
@@ -187,7 +187,7 @@ export function createTrashService(deps: TrashServiceDeps) {
     let purged = 0
     for (const record of batch) {
       try {
-        await deps.driveClient.deletePermanently(record.object_key)
+        await deps.driveClient.deletePermanently(record.object_key, record.storage_account_id ?? 1)
       } catch (error) {
         if (!(error instanceof BlobStoreError && error.code === 'not_found')) break
       }
@@ -218,7 +218,7 @@ export function createTrashService(deps: TrashServiceDeps) {
     if (item.object_key === null) throw new TrashServiceError('not_found')
 
     try {
-      await deps.driveClient.deletePermanently(item.object_key)
+      await deps.driveClient.deletePermanently(item.object_key, item.storage_account_id ?? 1)
     } catch (error) {
       if (!(error instanceof BlobStoreError && error.code === 'not_found')) {
         throw new TrashServiceError('storage_unavailable', { cause: error })
@@ -241,7 +241,7 @@ export function createTrashService(deps: TrashServiceDeps) {
     let purged = 0
     for (const record of batch) {
       try {
-        await deps.driveClient.deletePermanently(record.object_key)
+        await deps.driveClient.deletePermanently(record.object_key, record.storage_account_id ?? 1)
       } catch (error) {
         if (!(error instanceof BlobStoreError && error.code === 'not_found')) {
           break

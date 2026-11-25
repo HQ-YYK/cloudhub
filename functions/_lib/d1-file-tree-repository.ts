@@ -154,7 +154,7 @@ export function createD1FileTreeRepository(db: D1Database): FolderDeleteReposito
 
     async listBatchObjectKeys(ownerId, deletedAt, limit) {
       return db.prepare(`
-        SELECT id, object_key
+        SELECT id, object_key, storage_account_id
         FROM files
         WHERE owner_id = ?
           AND kind = 'file'
@@ -163,7 +163,7 @@ export function createD1FileTreeRepository(db: D1Database): FolderDeleteReposito
           AND object_key IS NOT NULL
         ORDER BY id ASC
         LIMIT ?
-      `).bind(ownerId, deletedAt, limit).all<{ id: string, object_key: string }>().then((result) => result.results)
+      `).bind(ownerId, deletedAt, limit).all<{ id: string, object_key: string, storage_account_id: number | null }>().then((result) => result.results)
     },
 
     async countBatchFiles(ownerId, deletedAt) {
@@ -182,7 +182,7 @@ export function createD1FileTreeRepository(db: D1Database): FolderDeleteReposito
     // (storage_status stays 'ready'/'failed'), so Google will not empty them for us.
     async listExpiredLiveObjectKeys(ownerId, cutoff, limit) {
       return db.prepare(`
-        SELECT id, object_key
+        SELECT id, object_key, storage_account_id
         FROM files
         WHERE owner_id = ?
           AND kind = 'file'
@@ -192,7 +192,7 @@ export function createD1FileTreeRepository(db: D1Database): FolderDeleteReposito
           AND object_key IS NOT NULL
         ORDER BY deleted_at ASC
         LIMIT ?
-      `).bind(ownerId, cutoff, limit).all<{ id: string, object_key: string }>().then((result) => result.results)
+      `).bind(ownerId, cutoff, limit).all<{ id: string, object_key: string, storage_account_id: number | null }>().then((result) => result.results)
     },
 
     async purgeEmptyTrashFolders(ownerId, cutoff) {

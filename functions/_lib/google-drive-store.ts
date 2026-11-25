@@ -5,9 +5,11 @@ import type { StorageRepository } from './storage-repository.ts'
 
 export class GoogleDriveStore implements BlobStore {
   private readonly client: GoogleDriveClient
+  private readonly accountId: number
 
-  constructor(env: AuthEnv, repository: StorageRepository, fetchImpl: typeof fetch = (input, init) => fetch(input, init)) {
+  constructor(env: AuthEnv, repository: StorageRepository, accountId = 1, fetchImpl: typeof fetch = (input, init) => fetch(input, init)) {
     this.client = new GoogleDriveClient(env, repository, fetchImpl)
+    this.accountId = accountId
   }
 
   private async mapResponseError(response: Response): Promise<never> {
@@ -18,6 +20,8 @@ export class GoogleDriveStore implements BlobStore {
   async head(id: string): Promise<BlobHead> {
     const response = await this.client.authorizedFetch(
       `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?fields=id,size,mimeType,md5Checksum,trashed`,
+      undefined,
+      this.accountId,
     )
     if (response.status === 404) throw new BlobStoreError('not_found', 'drive_object_not_found')
     if (response.status === 401) await this.mapResponseError(response)
@@ -49,9 +53,12 @@ export class GoogleDriveStore implements BlobStore {
       ? await this.client.authorizedFetch(
         `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`,
         { headers: { Range: `bytes=${range.start}-${range.end}` } },
+        this.accountId,
       )
       : await this.client.authorizedFetch(
         `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`,
+        undefined,
+        this.accountId,
       )
     if (range && response.status !== 206) await this.mapResponseError(response)
     if (!response.ok) await this.mapResponseError(response)
@@ -75,6 +82,7 @@ export class GoogleDriveStore implements BlobStore {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ trashed: true }),
       },
+      this.accountId,
     )
     if (response.status === 404) return
     if (!response.ok) await this.mapResponseError(response)

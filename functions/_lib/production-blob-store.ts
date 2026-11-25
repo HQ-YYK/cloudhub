@@ -3,7 +3,7 @@ import type { AuthEnv } from './cloudflare-env.ts'
 import { createD1StorageRepository } from './d1-storage-repository.ts'
 import { GoogleDriveStore } from './google-drive-store.ts'
 
-export function createProductionBlobStore(env: AuthEnv): BlobStore {
+export function createProductionBlobStore(env: AuthEnv, accountId = 1): BlobStore {
   if (
     !env.DB
     || !env.GOOGLE_CLIENT_ID
@@ -12,5 +12,5 @@ export function createProductionBlobStore(env: AuthEnv): BlobStore {
   ) {
     throw new BlobStoreError('unavailable', 'storage_not_configured')
   }
-  return new GoogleDriveStore(env, createD1StorageRepository(env.DB))
+  return new GoogleDriveStore(env, createD1StorageRepository(env.DB), accountId)
 }

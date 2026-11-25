@@ -8,8 +8,20 @@ import type { StorageRepository, StorageAccount } from './storage-repository.ts'
 function repository(account: StorageAccount | null): StorageRepository {
   return {
     getAccount: async () => account,
-    upsertAccount: async () => undefined,
+    listAccounts: async () => [],
+    listAccountsWithStats: async () => [],
+    countAccounts: async () => 0,
+    findAccountByEmail: async () => null,
+    createAccount: async () => { throw new Error('not_implemented') },
+    updateAccountTokens: async () => null,
+    setAccountStatus: async () => null,
+    setAccountReauth: async () => undefined,
+    setAccountQuota: async () => undefined,
     deleteAccount: async () => undefined,
+    countFilesByAccount: async () => 0,
+    pendingBytesByAccount: async () => 0,
+    findUserFolder: async () => null,
+    setUserFolderIfEmpty: async () => false,
     deleteExpiredOAuthStates: async () => undefined,
     createOAuthState: async () => undefined,
     consumeOAuthState: async () => null,
@@ -28,6 +40,10 @@ test('getAccessToken caches tokens and invalid_grant maps to reauth required', a
     refresh_token_iv: encrypted.iv,
     root_folder_id: 'folder',
     connected_by: 'admin',
+    status: 'active',
+    quota_total: null,
+    quota_used: null,
+    quota_checked_at: null,
     created_at: '2026-01-01T00:00:00.000Z',
     updated_at: '2026-01-01T00:00:00.000Z',
   }
@@ -43,8 +59,8 @@ test('getAccessToken caches tokens and invalid_grant maps to reauth required', a
       headers: { 'Content-Type': 'application/json' },
     })
   }
-  assert.equal(await getAccessToken(env, repository(account), fetchImpl), 'access-value')
-  assert.equal(await getAccessToken(env, repository(account), fetchImpl), 'access-value')
+  assert.equal(await getAccessToken(env, repository(account), 1, fetchImpl), 'access-value')
+  assert.equal(await getAccessToken(env, repository(account), 1, fetchImpl), 'access-value')
   assert.equal(calls, 1)
 
   clearAccessTokenCache()
@@ -53,7 +69,7 @@ test('getAccessToken caches tokens and invalid_grant maps to reauth required', a
     headers: { 'Content-Type': 'application/json' },
   })
   await assert.rejects(
-    getAccessToken(env, repository(account), invalid),
+    getAccessToken(env, repository(account), 1, invalid),
     (error: unknown) => error instanceof BlobStoreError
       && error.code === 'unavailable'
       && error.message === 'storage_reauth_required',

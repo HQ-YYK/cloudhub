@@ -92,7 +92,8 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
     async findFile(ownerId, id) {
       return db.prepare(`
         SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
-               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status
+               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status,
+               storage_account_id
         FROM files
         WHERE id = ?
           AND owner_id = ?
@@ -107,8 +108,9 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
         await db.prepare(`
           INSERT INTO files (
             id, owner_id, parent_id, kind, name, name_key, object_key,
-            size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status
-          ) VALUES (?, ?, ?, 'file', ?, ?, ?, ?, ?, ?, ?, NULL, 'pending')
+            size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status,
+            storage_account_id
+          ) VALUES (?, ?, ?, 'file', ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', ?)
         `).bind(
           input.id,
           input.ownerId,
@@ -120,6 +122,7 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
           input.mimeType,
           input.createdAt,
           input.updatedAt,
+          input.storageAccountId,
         ).run()
       } catch (error) {
         if (isActiveNameConflict(error)) throw new FileRepositoryConflictError()
@@ -128,7 +131,8 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
 
       const created = await db.prepare(`
         SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
-               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status
+               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status,
+               storage_account_id
         FROM files
         WHERE id = ? AND owner_id = ?
         LIMIT 1
@@ -189,7 +193,7 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
       return db.prepare(`
         SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
                size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status,
-               drive_folder_id, md5
+               drive_folder_id, md5, storage_account_id
         FROM files
         WHERE id = ?
           AND owner_id = ?
@@ -254,6 +258,7 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
       return db.prepare(`
         SELECT f.id, f.owner_id, f.parent_id, f.kind, f.name, f.name_key, f.object_key,
                f.size_bytes, f.mime_type, f.created_at, f.updated_at, f.deleted_at,
+               f.storage_account_id,
                parent.name AS parent_name,
                CASE WHEN f.kind = 'directory' THEN (
                  SELECT COUNT(*)
@@ -284,6 +289,7 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
       return db.prepare(`
         SELECT f.id, f.owner_id, f.parent_id, f.kind, f.name, f.name_key, f.object_key,
                f.size_bytes, f.mime_type, f.created_at, f.updated_at, f.deleted_at,
+               f.storage_account_id,
                parent.name AS parent_name,
                CASE WHEN f.kind = 'directory' THEN (
                  SELECT COUNT(*)
@@ -384,7 +390,7 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
 
     async listTrashObjectKeys(ownerId, cutoff, limit) {
       return db.prepare(`
-        SELECT id, object_key
+        SELECT id, object_key, storage_account_id
         FROM files
         WHERE owner_id = ?
           AND kind = 'file'
@@ -394,7 +400,7 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
           AND object_key IS NOT NULL
         ORDER BY deleted_at ASC
         LIMIT ?
-      `).bind(ownerId, cutoff, limit).all<{ id: string, object_key: string }>().then((result) => result.results)
+      `).bind(ownerId, cutoff, limit).all<{ id: string, object_key: string, storage_account_id: number | null }>().then((result) => result.results)
     },
 
     async countTrash(ownerId, cutoff) {

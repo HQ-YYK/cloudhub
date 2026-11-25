@@ -102,6 +102,16 @@ function cleanup() {
 test.before(() => {
   runWrangler(userInsert)
   runWrangler(`
+    INSERT OR IGNORE INTO storage_accounts (
+      id, google_email, refresh_token_ciphertext, refresh_token_iv,
+      root_folder_id, connected_by, status, quota_total, quota_used, quota_checked_at,
+      created_at, updated_at
+    ) VALUES (
+      1, 'integration@example.com', 'x', 'x', 'root', '${ownerId}', 'active', NULL, NULL, NULL,
+      '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z'
+    )
+  `)
+  runWrangler(`
     INSERT INTO users (
       id, username, password_hash, password_salt, password_iterations, disabled, created_at, updated_at
     ) VALUES (
@@ -144,6 +154,7 @@ test.after(() => {
   `)[0]?.results?.[0] as { count: number }
   assert.equal(sentinel.count, 1)
   runWrangler(`DELETE FROM files WHERE owner_id = '${sentinelId}'`)
+  runWrangler(`DELETE FROM storage_accounts WHERE google_email = 'integration@example.com'`)
   runWrangler(`DELETE FROM users WHERE id IN ('${ownerId}', '${otherOwnerId}', '${sentinelId}')`)
 })
 
@@ -203,6 +214,7 @@ test('local D1 tracks file storage states, permits failed-name retry, and isolat
     objectKey: `objects/${fileId}/content`,
     sizeBytes: 7,
     mimeType: 'application/octet-stream',
+    storageAccountId: 1,
     createdAt: '2030-01-01T00:00:00.000Z',
     updatedAt: '2030-01-01T00:00:00.000Z',
   }
@@ -256,6 +268,7 @@ test('soft-deleted files are hidden and cannot transition again', async () => {
     objectKey: `objects/${fileId}/content`,
     sizeBytes: 0,
     mimeType: null,
+    storageAccountId: 1,
     createdAt: '2030-01-01T00:00:00.000Z',
     updatedAt: '2030-01-01T00:00:00.000Z',
   })

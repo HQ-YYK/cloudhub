@@ -3,22 +3,25 @@ import type { AuthEnv } from './cloudflare-env.ts'
 import { decryptSecret } from './secret-box.ts'
 import type { StorageRepository } from './storage-repository.ts'
 
-let accessTokenCache: { token: string, expiresAt: number } | null = null
+const accessTokenCache = new Map<number, { token: string; expiresAt: number }>()
 
-export function clearAccessTokenCache() {
-  accessTokenCache = null
+export function clearAccessTokenCache(accountId?: number) {
+  if (accountId === undefined) accessTokenCache.clear()
+  else accessTokenCache.delete(accountId)
 }
 
 export async function getAccessToken(
   env: AuthEnv,
   repository: StorageRepository,
+  accountId: number,
   fetchImpl: typeof fetch = (input, init) => fetch(input, init),
 ) {
-  if (accessTokenCache && accessTokenCache.expiresAt > Date.now() + 60_000) {
-    return accessTokenCache.token
+  const cached = accessTokenCache.get(accountId)
+  if (cached && cached.expiresAt > Date.now() + 60_000) {
+    return cached.token
   }
 
-  const account = await repository.getAccount()
+  const account = await repository.getAccount(accountId)
   if (!account) throw new BlobStoreError('unavailable', 'storage_not_connected')
   if (
     !env.GOOGLE_CLIENT_ID
@@ -52,6 +55,7 @@ export async function getAccessToken(
   }
   if (!response.ok) {
     if (payload.error === 'invalid_grant') {
+      await repository.setAccountReauth(accountId, new Date().toISOString())
       throw new BlobStoreError('unavailable', 'storage_reauth_required')
     }
     throw new BlobStoreError('unavailable', 'google_token_unavailable')
@@ -64,9 +68,9 @@ export async function getAccessToken(
   const lifetimeMs = Number.isSafeInteger(lifetimeSeconds) && lifetimeSeconds > 0
     ? lifetimeSeconds * 1000
     : 3600 * 1000
-  accessTokenCache = {
+  accessTokenCache.set(accountId, {
     token: payload.access_token,
     expiresAt: Date.now() + lifetimeMs,
-  }
-  return accessTokenCache.token
+  })
+  return payload.access_token
 }

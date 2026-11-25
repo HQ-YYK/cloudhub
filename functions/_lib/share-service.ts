@@ -246,7 +246,7 @@ export async function getPublicShareMetadata(
 
 export async function streamPublicShare(
   shareRepository: ShareRepository,
-  createBlobStore: () => BlobStore,
+  createBlobStore: (accountId: number) => BlobStore,
   request: Request,
   token: string,
   now = new Date().toISOString(),
@@ -274,8 +274,8 @@ export async function streamPublicShare(
   let blob
   try {
     blob = rangeResult.kind === 'range'
-      ? await createBlobStore().get(record.file_object_key, { start: rangeResult.start, end: rangeResult.end })
-      : await createBlobStore().get(record.file_object_key)
+      ? await createBlobStore(record.file_storage_account_id ?? 1).get(record.file_object_key, { start: rangeResult.start, end: rangeResult.end })
+      : await createBlobStore(record.file_storage_account_id ?? 1).get(record.file_object_key)
   } catch (error) {
     if (error instanceof BlobStoreError && error.code === 'not_found') {
       throw new ShareServiceError('not_found')
