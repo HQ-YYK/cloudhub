@@ -8,9 +8,26 @@ export type AdminUser = {
   updated_at: string
 }
 
-type AdminUsersResponse = {
+export type StorageAccountStatus = 'active' | 'readonly' | 'reauth'
+
+export type StorageAccount = {
+  id: number
+  googleEmail: string
+  status: StorageAccountStatus
+  quotaTotal: number | null
+  quotaUsed: number | null
+  quotaCheckedAt: string | null
+  fileCount: number
+  bytesStored: number
+  createdAt: string
+}
+
+type AdminResponse = {
   users?: AdminUser[]
   user?: AdminUser
+  accounts?: StorageAccount[]
+  url?: string
+  ok?: boolean
   error?: string
 }
 
@@ -26,7 +43,7 @@ export class AdminRequestError extends Error {
   }
 }
 
-async function requestAdmin(path: string, init?: RequestInit): Promise<AdminUsersResponse> {
+async function requestAdmin(path: string, init?: RequestInit): Promise<AdminResponse> {
   let response: Response
   try {
     response = await fetch(path, {
@@ -42,9 +59,9 @@ async function requestAdmin(path: string, init?: RequestInit): Promise<AdminUser
     throw new AdminRequestError(0, 'network_error')
   }
 
-  let payload: AdminUsersResponse
+  let payload: AdminResponse
   try {
-    payload = await response.json() as AdminUsersResponse
+    payload = await response.json() as AdminResponse
   } catch {
     throw new AdminRequestError(response.status, 'invalid_response')
   }
@@ -87,4 +104,31 @@ export async function resetUserPassword(id: string, kdfSalt: string, authKey: st
 
 export async function resetUserTotp(id: string): Promise<void> {
   await requestAdmin(`/api/admin/users/${encodeURIComponent(id)}/totp/reset`, { method: 'POST' })
+}
+
+export async function listStorageAccounts(): Promise<StorageAccount[]> {
+  const payload = await requestAdmin('/api/admin/storage')
+  if (!Array.isArray(payload.accounts)) throw new AdminRequestError(500, 'invalid_response')
+  return payload.accounts
+}
+
+export async function connectStorageAccount(): Promise<string> {
+  const payload = await requestAdmin('/api/admin/storage/connect', { method: 'POST' })
+  if (typeof payload.url !== 'string') throw new AdminRequestError(500, 'invalid_response')
+  return payload.url
+}
+
+export async function setStorageAccountStatus(id: number, status: 'active' | 'readonly'): Promise<void> {
+  await requestAdmin(`/api/admin/storage/${id}/status`, {
+    method: 'POST',
+    body: JSON.stringify({ status }),
+  })
+}
+
+export async function refreshStorageAccount(id: number): Promise<void> {
+  await requestAdmin(`/api/admin/storage/${id}/refresh`, { method: 'POST' })
+}
+
+export async function removeStorageAccount(id: number): Promise<void> {
+  await requestAdmin(`/api/admin/storage/${id}`, { method: 'DELETE' })
 }

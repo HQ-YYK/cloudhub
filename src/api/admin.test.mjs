@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
+  connectStorageAccount,
   createUser,
+  listStorageAccounts,
   listUsers,
+  refreshStorageAccount,
+  removeStorageAccount,
   resetUserPassword,
   resetUserTotp,
+  setStorageAccountStatus,
   setUserDisabled,
 } from './admin.ts'
 
@@ -106,6 +111,97 @@ test('resetUserTotp uses POST and encoded id', async () => {
     assert.equal(request.input, '/api/admin/users/user%2Fid/totp/reset')
     assert.equal(request.init.method, 'POST')
     assert.equal(request.init.body, undefined)
+  } finally {
+    restore()
+  }
+})
+
+function storageAccount(overrides = {}) {
+  return {
+    id: 1,
+    googleEmail: 'a@example.com',
+    status: 'active',
+    quotaTotal: 1000,
+    quotaUsed: 500,
+    quotaCheckedAt: '2026-01-01T00:00:00.000Z',
+    fileCount: 3,
+    bytesStored: 400,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    ...overrides,
+  }
+}
+
+test('listStorageAccounts returns the accounts array', async () => {
+  const accounts = [storageAccount()]
+  let request
+  const restore = mockFetch(
+    new Response(JSON.stringify({ accounts }), { headers: { 'Content-Type': 'application/json' } }),
+    (input, init) => { request = { input, init } },
+  )
+  try {
+    assert.deepEqual(await listStorageAccounts(), accounts)
+    assert.equal(request.input, '/api/admin/storage')
+  } finally {
+    restore()
+  }
+})
+
+test('connectStorageAccount posts and returns the OAuth url', async () => {
+  let request
+  const restore = mockFetch(
+    new Response(JSON.stringify({ url: 'https://accounts.google.com/x' }), { headers: { 'Content-Type': 'application/json' } }),
+    (input, init) => { request = { input, init } },
+  )
+  try {
+    assert.equal(await connectStorageAccount(), 'https://accounts.google.com/x')
+    assert.equal(request.input, '/api/admin/storage/connect')
+    assert.equal(request.init.method, 'POST')
+  } finally {
+    restore()
+  }
+})
+
+test('setStorageAccountStatus posts the status', async () => {
+  let request
+  const restore = mockFetch(
+    new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } }),
+    (input, init) => { request = { input, init } },
+  )
+  try {
+    await setStorageAccountStatus(7, 'readonly')
+    assert.equal(request.input, '/api/admin/storage/7/status')
+    assert.equal(request.init.method, 'POST')
+    assert.deepEqual(JSON.parse(request.init.body), { status: 'readonly' })
+  } finally {
+    restore()
+  }
+})
+
+test('refreshStorageAccount posts without a body', async () => {
+  let request
+  const restore = mockFetch(
+    new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } }),
+    (input, init) => { request = { input, init } },
+  )
+  try {
+    await refreshStorageAccount(2)
+    assert.equal(request.input, '/api/admin/storage/2/refresh')
+    assert.equal(request.init.method, 'POST')
+  } finally {
+    restore()
+  }
+})
+
+test('removeStorageAccount uses DELETE', async () => {
+  let request
+  const restore = mockFetch(
+    new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } }),
+    (input, init) => { request = { input, init } },
+  )
+  try {
+    await removeStorageAccount(3)
+    assert.equal(request.input, '/api/admin/storage/3')
+    assert.equal(request.init.method, 'DELETE')
   } finally {
     restore()
   }

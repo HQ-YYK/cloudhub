@@ -310,3 +310,24 @@ test('xhr chunk upload aborts the request and cancels the session', async () => 
     restore()
   }
 })
+
+test('parses storage_full required and largestAvailable from a 507', async () => {
+  const file = new File([new Uint8Array(500)], 'big.bin')
+  const { calls, restore } = mockFetch((request) => {
+    if (request.init.method === 'POST') return json({ error: 'storage_full', required: 500, largestAvailable: 100 }, 507)
+    throw new Error('unexpected request')
+  })
+  try {
+    await assert.rejects(
+      uploadFile(file, null),
+      (error) => error instanceof UploadsRequestError
+        && error.status === 507
+        && error.code === 'storage_full'
+        && error.required === 500
+        && error.largestAvailable === 100,
+    )
+    assert.equal(calls.filter((call) => call.init.method === 'DELETE').length, 0)
+  } finally {
+    restore()
+  }
+})
