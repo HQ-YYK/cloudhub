@@ -279,6 +279,7 @@ test('me returns only public user fields', async () => {
     username: 'alice',
     role: 'admin',
     mustChangePassword: false,
+    totpEnabled: false,
   })
   assert.equal('sessionId' in body.user, false)
 })
