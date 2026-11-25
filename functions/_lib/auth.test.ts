@@ -143,6 +143,8 @@ test('authenticated user lookup rejects an expired or disabled session', async (
     role: 'user',
     mustChangePassword: false,
     sessionId: 'session-1',
+    legacy: true,
+    keysReady: false,
   })
   assert.equal(validRepository.touchCount, 1)
   assert.equal(await getAuthenticatedUser(repository().authRepository, request), null)
@@ -260,7 +262,7 @@ test('me returns only public user fields', async () => {
     prepare: (sql: string) => ({
       bind: () => ({
         first: async () => sql.includes('FROM sessions')
-          ? { session_id: 'session-1', id: 'user-1', username: 'alice', role: 'admin', must_change_password: 0 }
+          ? { session_id: 'session-1', id: 'user-1', username: 'alice', role: 'admin', must_change_password: 0, kdf_salt: 'somesalt', wrapped_master_key: null }
           : null,
         run: async () => ({ success: true }),
       }),
@@ -279,6 +281,8 @@ test('me returns only public user fields', async () => {
     username: 'alice',
     role: 'admin',
     mustChangePassword: false,
+    legacy: false,
+    keysReady: false,
     totpEnabled: false,
   })
   assert.equal('sessionId' in body.user, false)

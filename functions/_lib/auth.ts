@@ -2,7 +2,6 @@ import type { AuthRepository, LoginAttempt, NewSession } from './auth-repository
 
 export const PASSWORD_ITERATIONS = 100000
 export const MAX_PBKDF2_ITERATIONS = 100000
-export const MIN_INITIAL_PASSWORD_LENGTH = 4
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000
 export const MAX_LOGIN_FAILURES = 5
 export const LOGIN_WINDOW_MS = 15 * 60 * 1000
@@ -14,6 +13,8 @@ export interface PublicUser {
   role: 'admin' | 'user'
   mustChangePassword: boolean
   sessionId: string
+  legacy: boolean
+  keysReady: boolean
 }
 
 const encoder = new TextEncoder()
@@ -125,6 +126,8 @@ export async function getAuthenticatedUser(repository: AuthRepository, request: 
     role: row.role,
     mustChangePassword: row.must_change_password === 1,
     sessionId: row.session_id,
+    legacy: (row.kdf_salt ?? null) === null,
+    keysReady: (row.wrapped_master_key ?? null) !== null,
   } satisfies PublicUser
 }
 

@@ -7,6 +7,11 @@ export interface StoredUser {
   disabled: number
   role: 'admin' | 'user'
   must_change_password: number
+  kdf_salt: string | null
+  kdf_iterations: number | null
+  wrapped_master_key: string | null
+  recovery_wrapped_key: string | null
+  keys_updated_at: string | null
 }
 
 export interface SessionUser {
@@ -15,6 +20,8 @@ export interface SessionUser {
   username: string
   role: 'admin' | 'user'
   must_change_password: number
+  kdf_salt?: string | null
+  wrapped_master_key?: string | null
 }
 
 export interface UserSummary {
@@ -33,6 +40,8 @@ export interface CreateUserInput {
   passwordHash: string
   passwordSalt: string
   passwordIterations: number
+  kdfSalt: string
+  kdfIterations: number
   role: 'admin' | 'user'
   mustChangePassword: number
   createdAt: string
@@ -80,7 +89,7 @@ export interface AuthRepository {
   listUsers(): Promise<UserSummary[]>
   findUserById(id: string): Promise<UserSummary | null>
   createUser(input: CreateUserInput): Promise<UserSummary>
-  updatePassword(userId: string, hash: string, salt: string, iterations: number, mustChangePassword: number, updatedAt: string): Promise<void>
+  updatePassword(userId: string, hash: string, salt: string, iterations: number, kdfSalt: string, kdfIterations: number, mustChangePassword: number, updatedAt: string): Promise<void>
   setDisabled(userId: string, disabled: number, updatedAt: string): Promise<void>
   revokeOtherSessions(userId: string, keepSessionId: string): Promise<void>
 }

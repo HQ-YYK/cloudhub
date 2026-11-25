@@ -15,7 +15,8 @@ export function createD1AuthRepository(db: D1Database): AuthRepository {
   return {
     async findUser(username: string) {
       return db.prepare(`
-        SELECT id, username, password_hash, password_salt, password_iterations, disabled, role, must_change_password
+        SELECT id, username, password_hash, password_salt, password_iterations, disabled, role, must_change_password,
+               kdf_salt, kdf_iterations, wrapped_master_key, recovery_wrapped_key, keys_updated_at
         FROM users
         WHERE username = ?
         LIMIT 1
@@ -24,7 +25,8 @@ export function createD1AuthRepository(db: D1Database): AuthRepository {
 
     async findSessionUser(tokenHash: string, now: string) {
       return db.prepare(`
-        SELECT s.id AS session_id, u.id, u.username, u.role, u.must_change_password
+        SELECT s.id AS session_id, u.id, u.username, u.role, u.must_change_password,
+               u.kdf_salt, u.wrapped_master_key
         FROM sessions s
         INNER JOIN users u ON u.id = s.user_id
         WHERE s.token_hash = ?
@@ -145,14 +147,17 @@ export function createD1AuthRepository(db: D1Database): AuthRepository {
         await db.prepare(`
           INSERT INTO users (
             id, username, password_hash, password_salt, password_iterations,
+            kdf_salt, kdf_iterations,
             created_at, updated_at, disabled, role, must_change_password
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
         `).bind(
           input.id,
           input.username,
           input.passwordHash,
           input.passwordSalt,
           input.passwordIterations,
+          input.kdfSalt,
+          input.kdfIterations,
           input.createdAt,
           input.createdAt,
           input.role,
@@ -175,13 +180,14 @@ export function createD1AuthRepository(db: D1Database): AuthRepository {
       return created
     },
 
-    async updatePassword(userId, hash, salt, iterations, mustChangePassword, updatedAt) {
+    async updatePassword(userId, hash, salt, iterations, kdfSalt, kdfIterations, mustChangePassword, updatedAt) {
       await db.prepare(`
         UPDATE users
         SET password_hash = ?, password_salt = ?, password_iterations = ?,
+            kdf_salt = ?, kdf_iterations = ?,
             must_change_password = ?, updated_at = ?
         WHERE id = ?
-      `).bind(hash, salt, iterations, mustChangePassword, updatedAt, userId).run()
+      `).bind(hash, salt, iterations, kdfSalt, kdfIterations, mustChangePassword, updatedAt, userId).run()
     },
 
     async setDisabled(userId, disabled, updatedAt) {
