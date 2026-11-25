@@ -4,6 +4,7 @@ import CloudDrive from './CloudDrive'
 import TrashBin from './TrashBin'
 import MyShares from './MyShares'
 import ChangePassword from './ChangePassword'
+import TotpSettings from './TotpSettings'
 import AdminUsers from './AdminUsers'
 
 type Module = {
@@ -51,7 +52,7 @@ export default function Workspace() {
     { id: 'drive', label: '私有云盘', description: '浏览目录并创建文件夹。', icon: 'drive' },
     { id: 'trash', label: '回收站', description: '查看和恢复已删除的文件。', icon: 'trash' },
     { id: 'shares', label: '我的分享', description: '查看和管理已分享的文件链接。', icon: 'share' },
-    { id: 'account', label: '账号设置', description: '修改当前用户密码。', icon: '⚙' },
+    { id: 'account', label: '账号设置', description: '修改密码与两步验证。', icon: '⚙' },
     ...(user?.role === 'admin'
       ? [{ id: 'admin', label: '用户管理', description: '查看和管理用户。', icon: '●' }]
       : []),
@@ -110,7 +111,12 @@ export default function Workspace() {
         {activeModule === 'drive' && <CloudDrive />}
         {activeModule === 'trash' && <TrashBin />}
         {activeModule === 'shares' && <MyShares />}
-        {activeModule === 'account' && <ChangePassword />}
+        {activeModule === 'account' && (
+          <div className="account-settings">
+            <ChangePassword />
+            <TotpSettings />
+          </div>
+        )}
         {activeModule === 'admin' && user?.role === 'admin' && <AdminUsers />}
       </main>
     </div>

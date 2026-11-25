@@ -84,3 +84,7 @@ export async function resetUserPassword(id: string, password: string): Promise<A
   if (!payload.user) throw new AdminRequestError(500, 'invalid_response')
   return payload.user
 }
+
+export async function resetUserTotp(id: string): Promise<void> {
+  await requestAdmin(`/api/admin/users/${encodeURIComponent(id)}/totp/reset`, { method: 'POST' })
+}
