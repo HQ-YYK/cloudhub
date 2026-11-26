@@ -10,7 +10,7 @@ import {
 } from '../api/files'
 import { CryptoError, plainSizeFromCipher } from '../crypto'
 import { useAuth } from '../auth/useAuth'
-import { DownloadError, downloadEncryptedFile } from '../files/download'
+import { DownloadError, downloadEncryptedFile, formatDownloadStatus } from '../files/download'
 import { checkName, nameProblemMessage } from '../files/names'
 import { buildCreateDirectoryPayload, buildRenamePayload } from '../files/rename'
 import { fileKeyFor, resolveDriveItems, type DisplayItem } from '../files/session'
@@ -19,7 +19,7 @@ import MoveDialog from './MoveDialog'
 import RenameInput from './RenameInput'
 import ShareDialog from './ShareDialog'
 import { UploadQueue, type UploadQueueHandle } from './UploadQueue'
-import { formatFileSize, formatUpdatedAt, plainSizeLabel, renameErrorMessage, requestErrorMessage } from './drive-format'
+import { formatUpdatedAt, plainSizeLabel, renameErrorMessage, requestErrorMessage } from './drive-format'
 
 type DirectoryLevel = {
   id: string | null
@@ -39,7 +39,7 @@ export default function CloudDrive() {
   const [folderFormOpen, setFolderFormOpen] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
-  const [download, setDownload] = useState<{ name: string; receivedBytes: number; totalBytes: number } | null>(null)
+  const [download, setDownload] = useState<{ name: string; receivedBytes: number; totalBytes: number; speedBytesPerSecond: number | null; etaSeconds: number | null; contending: boolean } | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [actionError, setActionError] = useState('')
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -226,20 +226,22 @@ export default function CloudDrive() {
     try {
       const fk = await fileKeyFor(masterKey, item.id, item.wrappedKey)
       const totalBytes = plainSizeFromCipher(item.size_bytes)
-      setDownload({ name, receivedBytes: 0, totalBytes })
+      const contending = uploadQueueRef.current?.isUploading() ?? false
+      setDownload({ name, receivedBytes: 0, totalBytes, speedBytesPerSecond: null, etaSeconds: null, contending })
       await downloadEncryptedFile({
         fk,
         fileId: item.id,
         cipherSize: item.size_bytes,
         fileName: name,
         fetchRange: (start, end, signal) => fetchFileRange(item.id, start, end, signal),
-        onProgress: (receivedBytes, total) => setDownload({ name, receivedBytes, totalBytes: total }),
+        onProgress: (progress) => setDownload({ name, receivedBytes: progress.receivedBytes, totalBytes: progress.totalBytes, speedBytesPerSecond: progress.speedBytesPerSecond, etaSeconds: progress.etaSeconds, contending }),
         signal: controller.signal,
       })
     } catch (error) {
       if (error instanceof DownloadError) {
         if (error.code === 'decrypt_failed') setActionError('文件已损坏或被篡改，无法解密')
         else if (error.code === 'too_large') setActionError('文件太大，当前浏览器无法下载，请改用 Chrome 或 Edge')
+        else if (error.code === 'incomplete') setActionError('下载不完整，请重试')
       } else if (error instanceof CryptoError && error.code === 'decrypt_failed') {
         setActionError('文件已损坏或被篡改，无法解密')
       } else {
@@ -322,8 +324,6 @@ export default function CloudDrive() {
     setFolderMenuId((active) => (active === id ? null : id))
   }
 
-  const downloadPercent = download && download.totalBytes > 0 ? Math.min(100, Math.round((download.receivedBytes / download.totalBytes) * 100)) : 0
-
   return (
     <section className="drive-content" aria-labelledby="drive-heading">
       <div className="drive-toolbar">
@@ -381,10 +381,11 @@ export default function CloudDrive() {
       {download && (
         <div className="drive-download-progress" role="status">
           <span className="drive-download-name">{download.name}</span>
-          <span className="drive-download-size">{formatFileSize(download.receivedBytes)} / {formatFileSize(download.totalBytes)}</span>
+          <span className="drive-download-size">{formatDownloadStatus(download.receivedBytes, download.totalBytes, download.speedBytesPerSecond, download.etaSeconds)}</span>
           <button type="button" onClick={() => downloadControllerRef.current?.abort()}>取消</button>
+          {download.contending && <p className="drive-download-note">同时上传和下载会互相抢带宽，速度会变慢。</p>}
           <div className="upload-progress" role="progressbar" aria-valuemin={0} aria-valuemax={download.totalBytes} aria-valuenow={download.receivedBytes} aria-label="下载进度">
-            <span className="upload-progress-fill" style={{ width: `${downloadPercent}%` }} />
+            <span className="upload-progress-fill" style={{ width: `${download.totalBytes > 0 ? Math.min(100, Math.round((download.receivedBytes / download.totalBytes) * 100)) : 0}%` }} />
           </div>
         </div>
       )}

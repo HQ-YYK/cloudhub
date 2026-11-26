@@ -127,7 +127,9 @@ export async function downloadFile(fileId: string): Promise<void> {
   document.body.append(anchor)
   anchor.click()
   anchor.remove()
-  URL.revokeObjectURL(objectUrl)
+  // Keep the object URL alive across the click so the browser never saves an
+  // empty or truncated file before it has finished reading the blob.
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
 }
 
 export async function fetchFileRange(
@@ -135,7 +137,7 @@ export async function fetchFileRange(
   start: number,
   end: number,
   signal?: AbortSignal,
-): Promise<Uint8Array<ArrayBuffer>> {
+): Promise<ReadableStream<Uint8Array<ArrayBuffer>>> {
   let response: Response
   try {
     response = await fetch(`/api/files/${encodeURIComponent(fileId)}/download`, {
@@ -156,7 +158,8 @@ export async function fetchFileRange(
     }
     throw new FilesRequestError(response.status, payload.error ?? 'request_failed')
   }
-  return new Uint8Array(await response.arrayBuffer())
+  if (!response.body) throw new FilesRequestError(response.status, 'invalid_response')
+  return response.body
 }
 
 export async function deleteFile(fileId: string): Promise<void> {
