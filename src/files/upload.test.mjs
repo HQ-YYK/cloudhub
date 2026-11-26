@@ -122,3 +122,143 @@ test('uploadEncryptedFile resumes from the saved session without recreating it',
     restore()
   }
 })
+
+test('uploadEncryptedFile pauses on user abort without cancelling the session', async () => {
+  const mk = generateMasterKey()
+  const file = makeFile()
+  const controller = new AbortController()
+  let deletes = 0
+  const { restore } = mockFetch((request) => {
+    if (request.method === 'POST') return json({ uploadId: 'u1', chunkSize: 33554432, receivedBytes: 0 }, 201)
+    if (request.method === 'PUT') {
+      controller.abort('pause')
+      return json({ receivedBytes: 128, done: false })
+    }
+    if (request.method === 'DELETE') {
+      deletes += 1
+      return json({ ok: true })
+    }
+    throw new Error(`unexpected ${request.method} ${request.input}`)
+  })
+  try {
+    await assert.rejects(
+      () => uploadEncryptedFile(file, null, mk, { signal: controller.signal }),
+      (error) => error instanceof UploadPausedError
+        && error.pauseReason === 'user'
+        && error.session.uploadId === 'u1'
+        && error.session.fk instanceof Uint8Array
+        && error.session.fk.length === 32,
+    )
+    assert.equal(deletes, 0)
+  } finally {
+    restore()
+  }
+})
+
+test('uploadEncryptedFile resumes a user-paused session with the same upload id and file key', async () => {
+  const mk = generateMasterKey()
+  const file = makeFile()
+  const item = {
+    id: 'f1',
+    parent_id: null,
+    kind: 'file',
+    name: 'enc',
+    size_bytes: 128,
+    mime_type: 'application/octet-stream',
+    created_at: '2026-01-01T00:00:00.000Z',
+    updated_at: '2026-01-01T00:00:00.000Z',
+    enc: 1,
+    wrappedKey: 'wk',
+  }
+  let phase = 'pause'
+  const controller = new AbortController()
+  let session = null
+  const { calls, restore } = mockFetch((request) => {
+    if (request.method === 'POST') return json({ uploadId: 'u1', chunkSize: 33554432, receivedBytes: 0 }, 201)
+    if (request.method === 'PUT') {
+      if (phase === 'pause') {
+        controller.abort('pause')
+        return json({ receivedBytes: 128, done: false })
+      }
+      return json({ receivedBytes: 128, done: true, item })
+    }
+    throw new Error(`unexpected ${request.method} ${request.input}`)
+  })
+  try {
+    await assert.rejects(
+      () => uploadEncryptedFile(file, null, mk, { signal: controller.signal }),
+      (error) => {
+        if (!(error instanceof UploadPausedError)) return false
+        session = error.session
+        return error.pauseReason === 'user'
+      },
+    )
+    phase = 'resume'
+    const result = await uploadEncryptedFile(file, null, mk, { resume: session })
+    assert.deepEqual(result, item)
+    const puts = calls.filter((call) => call.method === 'PUT')
+    assert.ok(puts.every((call) => call.input.includes('/u1/')), 'resume should reuse the paused upload id')
+    assert.equal(calls.filter((call) => call.method === 'POST').length, 1, 'resume must not recreate the session or file key')
+  } finally {
+    restore()
+  }
+})
+
+test('uploadEncryptedFile cancels the server session on user cancel', async () => {
+  const mk = generateMasterKey()
+  const file = makeFile()
+  const controller = new AbortController()
+  let deletes = 0
+  const { restore } = mockFetch((request) => {
+    if (request.method === 'POST') return json({ uploadId: 'u1', chunkSize: 33554432, receivedBytes: 0 }, 201)
+    if (request.method === 'PUT') {
+      controller.abort()
+      return json({ receivedBytes: 128, done: false })
+    }
+    if (request.method === 'DELETE') {
+      deletes += 1
+      return json({ ok: true })
+    }
+    throw new Error(`unexpected ${request.method} ${request.input}`)
+  })
+  try {
+    await assert.rejects(
+      () => uploadEncryptedFile(file, null, mk, { signal: controller.signal }),
+      (error) => error instanceof UploadsRequestError && error.code === 'aborted',
+    )
+    assert.equal(deletes, 1)
+  } finally {
+    restore()
+  }
+})
+
+test('uploadEncryptedFile pauses after createUpload returns when aborted during creation', async () => {
+  const mk = generateMasterKey()
+  const file = makeFile()
+  const controller = new AbortController()
+  let deletes = 0
+  const { restore } = mockFetch((request) => {
+    if (request.method === 'POST') {
+      controller.abort('pause')
+      return json({ uploadId: 'u1', chunkSize: 33554432, receivedBytes: 0 }, 201)
+    }
+    if (request.method === 'DELETE') {
+      deletes += 1
+      return json({ ok: true })
+    }
+    throw new Error(`unexpected ${request.method} ${request.input}`)
+  })
+  try {
+    await assert.rejects(
+      () => uploadEncryptedFile(file, null, mk, { signal: controller.signal }),
+      (error) => error instanceof UploadPausedError
+        && error.pauseReason === 'user'
+        && error.session.uploadId === 'u1'
+        && error.session.fk instanceof Uint8Array
+        && error.session.fk.length === 32,
+    )
+    assert.equal(deletes, 0)
+  } finally {
+    restore()
+  }
+})

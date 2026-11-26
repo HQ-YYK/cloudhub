@@ -22,6 +22,7 @@ type UploadQueueItem = {
   error: string
   session: UploadSession | null
   retryAttempt: number | null
+  pauseReason: 'user' | 'network' | null
 }
 
 type SpeedSample = { time: number; receivedBytes: number }
@@ -91,7 +92,7 @@ function computeSpeed(samples: SpeedSample[]): number | null {
 }
 
 function makeItem(key: string, file: File, parentId: string | null, status: UploadStatus, error = ''): UploadQueueItem {
-  return { key, file, parentId, status, receivedBytes: 0, totalBytes: file.size, error, session: null, retryAttempt: null }
+  return { key, file, parentId, status, receivedBytes: 0, totalBytes: file.size, error, session: null, retryAttempt: null, pauseReason: null }
 }
 
 function validateFile(file: File): string {
@@ -113,13 +114,17 @@ function statusLabel(item: UploadQueueItem, samples: SpeedSample[]): string {
   }
   if (item.status === 'done') return '已完成'
   if (item.status === 'cancelled') return '已取消'
-  if (item.status === 'paused') return '网络不稳定，上传已暂停'
+  if (item.status === 'paused') return item.pauseReason === 'user' ? '已暂停' : '网络不稳定，上传已暂停'
   if (item.status === 'failed') return item.error
   return '等待中'
 }
 
 function canCancel(item: UploadQueueItem): boolean {
   return item.status === 'waiting' || item.status === 'uploading'
+}
+
+function canPause(item: UploadQueueItem): boolean {
+  return item.status === 'uploading'
 }
 
 function canRetry(item: UploadQueueItem): boolean {
@@ -200,7 +205,7 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
         if (error instanceof UploadsRequestError && error.code === 'aborted') {
           patchItem(item.key, { status: 'cancelled', retryAttempt: null })
         } else if (error instanceof UploadPausedError) {
-          patchItem(item.key, { status: 'paused', session: error.session, retryAttempt: null })
+          patchItem(item.key, { status: 'paused', session: error.session, pauseReason: error.pauseReason, retryAttempt: null })
         } else {
           patchItem(item.key, { status: 'failed', error: uploadErrorMessage(error), retryAttempt: null })
         }
@@ -246,6 +251,10 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
       if (item.status === 'uploading') controllersRef.current.get(key)?.abort()
     }, [patchItem])
 
+    const pause = useCallback((key: string) => {
+      controllersRef.current.get(key)?.abort('pause')
+    }, [])
+
     const retry = useCallback((key: string) => {
       dropSamples(key)
       patchItem(key, { status: 'waiting', receivedBytes: 0, error: '', session: null, retryAttempt: null })
@@ -285,6 +294,7 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
     useImperativeHandle(ref, () => ({ enqueue, isUploading }), [enqueue, isUploading])
 
     const hasInProgress = items.some((item) => item.status === 'waiting' || item.status === 'uploading')
+    const hasPaused = items.some((item) => item.status === 'paused')
     const hasCompleted = items.some((item) => item.status === 'done')
     const doneCount = items.filter((item) => item.status === 'done').length
     const activeItems = items.filter((item) => item.status !== 'failed' && item.status !== 'cancelled')
@@ -299,14 +309,14 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
     const totalSpeedLabel = uploadingCount > 1 && totalSpeed > 0 ? ` · ${formatSpeed(totalSpeed)}` : ''
 
     useEffect(() => {
-      if (!hasInProgress) return
+      if (!hasInProgress && !hasPaused) return
       function warnBeforeUnload(event: BeforeUnloadEvent) {
         event.preventDefault()
         event.returnValue = ''
       }
       window.addEventListener('beforeunload', warnBeforeUnload)
       return () => window.removeEventListener('beforeunload', warnBeforeUnload)
-    }, [hasInProgress])
+    }, [hasInProgress, hasPaused])
 
     if (items.length === 0) return null
 
@@ -357,6 +367,7 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
                     <span className="upload-queue-size">{formatBytes(item.receivedBytes)} / {formatBytes(item.totalBytes)}</span>
                     <span className={`upload-queue-status is-${item.status}`}>{statusLabel(item, samples)}</span>
                     <span className="upload-queue-controls">
+                      {canPause(item) && <button type="button" onClick={() => pause(item.key)}>暂停</button>}
                       {canResume(item) && <button type="button" onClick={() => resume(item.key)}>继续上传</button>}
                       {canCancel(item) && <button type="button" onClick={() => cancel(item.key)}>取消</button>}
                       {canRetry(item) && <button type="button" onClick={() => retry(item.key)}>重试</button>}
@@ -373,6 +384,7 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
                   >
                     <span className={fillClass} style={{ width: `${percent}%` }} />
                   </div>
+                  {item.status === 'paused' && <p className="upload-queue-note">暂停的上传需要保持页面打开，刷新或关闭后要重新上传。</p>}
                 </li>
               )
             })}

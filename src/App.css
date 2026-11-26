@@ -375,6 +375,7 @@
 .drive-download-progress button { padding: 0; color: var(--blue); background: transparent; border: 0; font-size: 11px; font-weight: 700; }
 .drive-download-note { grid-column: 1 / -1; margin: 0; color: #9a6a00; font-size: 11px; line-height: 1.5; }
 .upload-queue-hint { margin: 0 0 12px; color: #8995a9; font-size: 11px; line-height: 1.6; }
+.upload-queue-note { margin: 0; color: #9a6a00; font-size: 11px; line-height: 1.5; }
 
 .keep-unlocked-row { display: grid; gap: 3px; }
 .keep-unlocked-label { display: flex; align-items: center; gap: 9px; font-weight: 650; }

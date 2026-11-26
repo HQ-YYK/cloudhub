@@ -28,13 +28,17 @@ export type UploadSession = {
   wrappedKey: string
 }
 
+export type PauseReason = 'user' | 'network'
+
 export class UploadPausedError extends Error {
   readonly session: UploadSession
+  readonly pauseReason: PauseReason
 
-  constructor(session: UploadSession) {
+  constructor(session: UploadSession, pauseReason: PauseReason = 'network') {
     super('upload_paused')
     this.name = 'UploadPausedError'
     this.session = session
+    this.pauseReason = pauseReason
   }
 }
 
@@ -71,6 +75,12 @@ async function abortUpload(uploadId: string | null): Promise<never> {
   throw new UploadsRequestError(0, 'aborted')
 }
 
+// A user pause aborts the in-flight request with reason 'pause' and keeps the
+// server-side session; any other abort is a cancel that must release it.
+function pausedByUser(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true && signal.reason === 'pause'
+}
+
 export async function uploadEncryptedFile(
   file: File,
   parentId: string | null,
@@ -84,7 +94,7 @@ export async function uploadEncryptedFile(
   } = {},
 ): Promise<DriveItem | null> {
   const { onProgress, onRetry, signal, retryDelays = DEFAULT_RETRY_DELAYS, resume = null } = options
-  if (signal?.aborted) return abortUpload(null)
+  if (signal?.aborted && !pausedByUser(signal)) return abortUpload(null)
 
   let session: UploadSession
   if (resume) {
@@ -110,6 +120,9 @@ export async function uploadEncryptedFile(
       nameKey,
       wrappedKey,
     }
+    // A pause that arrived while the session was being created must still wait
+    // for createUpload to return so the caller has a session it can resume.
+    if (pausedByUser(signal)) throw new UploadPausedError(session, 'user')
   }
 
   let plainOffset = 0
@@ -118,7 +131,10 @@ export async function uploadEncryptedFile(
   const report = () => onProgress?.(plainOffset, session.plainSize)
 
   while (true) {
-    if (signal?.aborted) return abortUpload(session.uploadId)
+    if (signal?.aborted) {
+      if (pausedByUser(signal)) throw new UploadPausedError(session, 'user')
+      return abortUpload(session.uploadId)
+    }
 
     const chunkIndex = Math.floor(plainOffset / PLAIN_CHUNK_SIZE)
     const { start, end, isLast } = plainChunkRange(session.plainSize, chunkIndex)
@@ -133,7 +149,10 @@ export async function uploadEncryptedFile(
         onProgress?.(plainOffset + Math.min(withinChunk, end - start), session.plainSize)
       })
     } catch (error) {
-      if (error instanceof UploadsRequestError && error.code === 'aborted') return abortUpload(session.uploadId)
+      if (error instanceof UploadsRequestError && error.code === 'aborted') {
+        if (pausedByUser(signal)) throw new UploadPausedError(session, 'user')
+        return abortUpload(session.uploadId)
+      }
       if (error instanceof UploadsRequestError && error.code === 'offset_mismatch') {
         if (typeof error.receivedBytes !== 'number') throw error
         plainOffset = plainOffsetFromCipherReceived(error.receivedBytes, session.plainSize)
