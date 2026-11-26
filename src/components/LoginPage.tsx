@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useAuth } from '../auth/useAuth'
+import { platformErrorMessage } from '../utils/service-limits'
 
 export default function LoginPage() {
   const { login, verifyTotp, error: sessionError, clearError } = useAuth()
@@ -17,6 +18,15 @@ export default function LoginPage() {
     clearError()
   }
 
+  function loginErrorMessage(error: unknown, fallback: string): string {
+    if (error instanceof Error) {
+      const platform = platformErrorMessage(error) ?? platformErrorMessage(error.cause)
+      if (platform) return platform
+      return error.message
+    }
+    return fallback
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     resetErrors()
@@ -29,7 +39,7 @@ export default function LoginPage() {
         setTotpMode('code')
       }
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : '登录失败，请稍后重试。')
+      setError(loginErrorMessage(requestError, '登录失败，请稍后重试。'))
     } finally {
       setSubmitting(false)
     }
@@ -43,7 +53,7 @@ export default function LoginPage() {
     try {
       await verifyTotp(challenge, totpMode === 'code' ? { code: totpCode } : { recoveryCode: totpCode })
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : '验证失败，请稍后重试。')
+      setError(loginErrorMessage(requestError, '验证失败，请稍后重试。'))
     } finally {
       setSubmitting(false)
     }

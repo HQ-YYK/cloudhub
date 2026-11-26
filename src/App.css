@@ -349,6 +349,7 @@
 .admin-storage { max-width: 980px; }
 .admin-storage-toolbar-actions { display: flex; align-items: center; gap: 8px; }
 .admin-storage-alert { margin: 0 0 14px; padding: 11px 14px; border-radius: 8px; font-size: 13px; line-height: 1.6; }
+.admin-storage-note { margin: 0 0 14px; padding: 11px 14px; border-radius: 8px; font-size: 13px; line-height: 1.6; color: #66738a; background: #f5f7fb; border: 1px solid #e6ebf3; }
 .admin-storage-alert.is-danger { color: #a24b58; background: #fff0f1; border: 1px solid #f5d5d9; }
 .admin-storage-alert.is-success { color: #2f6b4f; background: #ecf7f1; border: 1px solid #cfe8db; }
 .admin-storage-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 16px; }
@@ -375,6 +376,7 @@
 .drive-download-progress button { padding: 0; color: var(--blue); background: transparent; border: 0; font-size: 11px; font-weight: 700; }
 .drive-download-note { grid-column: 1 / -1; margin: 0; color: #9a6a00; font-size: 11px; line-height: 1.5; }
 .upload-queue-hint { margin: 0 0 12px; color: #8995a9; font-size: 11px; line-height: 1.6; }
+.upload-queue-limit-hint { margin: 0 0 16px; color: #8995a9; font-size: 11px; line-height: 1.6; }
 .upload-queue-note { margin: 0; color: #9a6a00; font-size: 11px; line-height: 1.5; }
 
 .keep-unlocked-row { display: grid; gap: 3px; }

@@ -72,6 +72,21 @@ test('createUpload posts the encrypted upload fields', async () => {
   }
 })
 
+test('createUpload maps a 429 non-JSON response to platform_limited', async () => {
+  const { restore } = mockFetch(() => new Response('<html>rate limited</html>', {
+    status: 429,
+    headers: { 'Content-Type': 'text/html' },
+  }))
+  try {
+    await assert.rejects(
+      () => createUpload({ id: 'f1', parentId: null, encName: 'enc', nameKey: 'nk', wrappedKey: 'wk', size: 28 }),
+      (error) => error instanceof UploadsRequestError && error.status === 429 && error.code === 'platform_limited',
+    )
+  } finally {
+    restore()
+  }
+})
+
 test('createUpload surfaces an id_conflict error', async () => {
   const { restore } = mockFetch(() => json({ error: 'id_conflict' }, 409))
   try {

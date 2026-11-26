@@ -1,3 +1,5 @@
+import { classifyPlatformResponse } from '../utils/service-limits.ts'
+
 export type ShareView = {
   id: string
   fileId: string
@@ -69,7 +71,8 @@ async function requestShares(path: string, init?: RequestInit): Promise<ShareRes
   try {
     payload = await response.json() as ShareResponse
   } catch {
-    throw new SharesRequestError(response.status, 'invalid_response')
+    const code = classifyPlatformResponse(response.status, response.headers.get('Content-Type')) ?? 'invalid_response'
+    throw new SharesRequestError(response.status, code)
   }
   if (!response.ok) throw new SharesRequestError(response.status, payload.error ?? 'request_failed')
   return payload

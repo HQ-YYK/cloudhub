@@ -1,4 +1,5 @@
 import { FilesRequestError, type DriveItem } from './files.ts'
+import { classifyPlatformResponse } from '../utils/service-limits.ts'
 
 export const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024
 
@@ -71,18 +72,22 @@ async function requestUploads(path: string, init: RequestInit = {}, signal?: Abo
     throw new UploadsRequestError(0, 'network_error')
   }
 
-  let payload: UploadResponse
+  let payload: UploadResponse = {}
+  let parseFailed = false
   try {
     payload = await response.json() as UploadResponse
   } catch {
-    payload = {}
+    parseFailed = true
   }
   if (!response.ok) {
     const receivedBytes = typeof payload.receivedBytes === 'number' ? payload.receivedBytes : null
     const required = typeof payload.required === 'number' ? payload.required : null
     const largestAvailable = typeof payload.largestAvailable === 'number' ? payload.largestAvailable : null
     const retryAfter = parseRetryAfter(response.headers.get('Retry-After'))
-    throw new UploadsRequestError(response.status, payload.error ?? 'request_failed', receivedBytes, required, largestAvailable, retryAfter)
+    const code = parseFailed
+      ? (classifyPlatformResponse(response.status, response.headers.get('Content-Type')) ?? 'request_failed')
+      : (payload.error ?? 'request_failed')
+    throw new UploadsRequestError(response.status, code, receivedBytes, required, largestAvailable, retryAfter)
   }
   return payload
 }
@@ -115,11 +120,11 @@ export async function createUpload(input: CreateUploadInput): Promise<{ uploadId
   return { uploadId: payload.uploadId, chunkSize: payload.chunkSize, receivedBytes: payload.receivedBytes }
 }
 
-function parseErrorPayload(text: string): UploadResponse {
+function parseErrorPayload(text: string): { payload: UploadResponse; failed: boolean } {
   try {
-    return JSON.parse(text) as UploadResponse
+    return { payload: JSON.parse(text) as UploadResponse, failed: false }
   } catch {
-    return {}
+    return { payload: {}, failed: true }
   }
 }
 
@@ -158,14 +163,17 @@ function sendChunkWithXhr(
     }
     xhr.onload = () => {
       cleanup()
-      const payload = parseErrorPayload(xhr.responseText)
+      const parsed = parseErrorPayload(xhr.responseText)
       if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(payload)
+        resolve(parsed.payload)
         return
       }
-      const receivedBytes = typeof payload.receivedBytes === 'number' ? payload.receivedBytes : null
+      const receivedBytes = typeof parsed.payload.receivedBytes === 'number' ? parsed.payload.receivedBytes : null
       const retryAfter = parseRetryAfter(xhr.getResponseHeader('Retry-After'))
-      reject(new UploadsRequestError(xhr.status, payload.error ?? 'request_failed', receivedBytes, null, null, retryAfter))
+      const code = parsed.failed
+        ? (classifyPlatformResponse(xhr.status, xhr.getResponseHeader('Content-Type')) ?? 'request_failed')
+        : (parsed.payload.error ?? 'request_failed')
+      reject(new UploadsRequestError(xhr.status, code, receivedBytes, null, null, retryAfter))
     }
     xhr.onerror = () => {
       cleanup()
