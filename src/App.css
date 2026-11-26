@@ -114,8 +114,11 @@
 .drive-rename-input { min-width: 0; padding: 4px 8px; color: var(--ink); background: #fff; border: 1px solid #b8c9f5; border-radius: 6px; font: inherit; font-size: 13px; outline: none; }
 .drive-rename-input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(53, 104, 239, .12); }
 .drive-rename-input:disabled { cursor: wait; opacity: .65; }
-.drive-file-heading .drive-rename-input { flex: 1; }
-.drive-folder-card .drive-rename-input { width: 100%; }
+.drive-rename-wrap { display: grid; gap: 4px; min-width: 0; }
+.drive-rename-wrap .drive-rename-input { width: 100%; }
+.drive-rename-error { color: #c64f5c; font-size: 10px; }
+.drive-file-heading .drive-rename-wrap { flex: 1; }
+.drive-folder-card .drive-rename-wrap { width: 100%; }
 .move-dialog-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 24px; background: rgba(30, 41, 66, .45); }
 .move-dialog { width: min(100%, 380px); max-height: min(80vh, 560px); display: flex; flex-direction: column; overflow: hidden; background: #fff; border-radius: 14px; box-shadow: 0 24px 70px rgba(36, 57, 105, .25); outline: none; }
 .move-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
@@ -360,3 +363,28 @@
 .admin-storage-progress span { display: block; height: 100%; background: var(--blue); border-radius: 3px; }
 .admin-storage-row-warning { margin: 6px 0 0; color: #9a6a00; font-size: 11px; line-height: 1.5; }
 .admin-storage-row-warning.is-danger { color: #c64f5c; }
+
+.drive-enc-tag { flex-shrink: 0; margin-left: 8px; padding: 1px 7px; color: #8490a4; background: #eef1f6; border-radius: 999px; font-size: 9px; font-weight: 700; }
+.drive-file-heading .drive-enc-tag { margin-left: 8px; }
+.drive-download-progress { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 10px; margin-bottom: 16px; padding: 12px 14px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+.drive-download-progress .upload-progress { grid-column: 1 / -1; }
+.drive-download-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 650; }
+.drive-download-size { color: #8995a9; font-size: 11px; white-space: nowrap; }
+.drive-download-progress button { padding: 0; color: var(--blue); background: transparent; border: 0; font-size: 11px; font-weight: 700; }
+.upload-queue-hint { margin: 0 0 12px; color: #8995a9; font-size: 11px; line-height: 1.6; }
+
+.keep-unlocked-row { display: grid; gap: 3px; }
+.keep-unlocked-label { display: flex; align-items: center; gap: 9px; font-weight: 650; }
+.keep-unlocked-label input { width: 16px; height: 16px; padding: 0; border: 1px solid #dce3ef; border-radius: 4px; background: #fff; appearance: auto; }
+.keep-unlocked-hint { color: #8995a9; font-size: 11px; line-height: 1.5; }
+
+.device-trust-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.device-trust-status { display: inline-flex; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; color: #8490a4; background: #eef1f6; }
+.device-trust-status.is-on { color: #2f6b4f; background: #ecf7f1; }
+
+.share-generate-hint { margin: 0; color: #9a6a00; font-size: 11px; line-height: 1.6; }
+
+.public-share-error { margin: 0 0 14px; color: #c64f5c; font-size: 12px; }
+.public-share-download-progress { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; margin: 0 0 18px; padding: 12px 14px; color: var(--ink); background: #fbfcff; border: 1px solid var(--line); border-radius: 8px; text-align: left; font-size: 12px; }
+.public-share-download-progress .upload-progress { grid-column: 1 / -1; }
+.public-share-download-progress button { padding: 0; color: var(--blue); background: transparent; border: 0; font-size: 11px; font-weight: 700; }

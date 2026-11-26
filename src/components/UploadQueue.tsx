@@ -1,6 +1,9 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { FilesRequestError } from '../api/files'
-import { MAX_FILE_SIZE, UploadsRequestError, uploadFile } from '../api/uploads'
+import { MAX_FILE_SIZE, UploadsRequestError } from '../api/uploads'
+import { UploadProgressError } from '../files/chunks'
+import { checkName, nameProblemMessage } from '../files/names'
+import { uploadEncryptedFile } from '../files/upload'
 
 export type UploadQueueHandle = {
   enqueue: (files: File[], parentId: string | null) => void
@@ -24,6 +27,7 @@ const SPEED_WINDOW_MS = 5000
 const MAX_CONCURRENT_UPLOADS = 3
 
 function uploadErrorMessage(error: unknown): string {
+  if (error instanceof UploadProgressError) return '上传进度异常，请取消后重新上传'
   if (error instanceof FilesRequestError) {
     if (error.code === 'conflict') return '当前目录已有同名文件'
     if (error.code === 'storage_not_connected') return '管理员尚未连接 Google Drive'
@@ -90,6 +94,8 @@ function makeItem(key: string, file: File, parentId: string | null, status: Uplo
 function validateFile(file: File): string {
   if (file.size === 0) return '不支持空文件'
   if (file.size > MAX_FILE_SIZE) return '文件超过 10 GiB 上限'
+  const name = checkName(file.name)
+  if (!name.ok) return nameProblemMessage(name.problem, name.length)
   return ''
 }
 
@@ -119,8 +125,8 @@ function canRemove(item: UploadQueueItem): boolean {
   return item.status === 'done' || item.status === 'failed' || item.status === 'cancelled'
 }
 
-export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId: string | null) => void }>(
-  function UploadQueue({ onItemDone }, ref) {
+export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId: string | null) => void; masterKey: Uint8Array<ArrayBuffer> | null }>(
+  function UploadQueue({ onItemDone, masterKey }, ref) {
     const [items, setItems] = useState<UploadQueueItem[]>([])
     const [collapsed, setCollapsed] = useState(false)
     const itemsRef = useRef(items)
@@ -157,7 +163,11 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
       controllersRef.current.set(item.key, controller)
       patchItem(item.key, { status: 'uploading', error: '' })
       try {
-        await uploadFile(item.file, item.parentId, {
+        if (!masterKey) {
+          patchItem(item.key, { status: 'failed', error: '文件加密密钥尚未就绪，请刷新页面重试。' })
+          return
+        }
+        await uploadEncryptedFile(item.file, item.parentId, masterKey, {
           onProgress: (receivedBytes, totalBytes) => {
             recordSample(item.key, receivedBytes)
             patchItem(item.key, { receivedBytes, totalBytes })
@@ -178,7 +188,7 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
         controllersRef.current.delete(item.key)
         activeKeysRef.current.delete(item.key)
       }
-    }, [patchItem, recordSample, dropSamples])
+    }, [patchItem, recordSample, dropSamples, masterKey])
 
     const pump = useCallback(() => {
       const available = MAX_CONCURRENT_UPLOADS - activeKeysRef.current.size
@@ -271,6 +281,7 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
 
     return (
       <div className="upload-queue" aria-label="上传队列">
+        {hasInProgress && <p className="upload-queue-hint">文件在你的浏览器里加密后上传。请不要关闭或刷新页面，否则未完成的上传需要重新开始。</p>}
         <div className="upload-queue-header">
           <div className="upload-queue-title">
             <h3>上传队列</h3>
