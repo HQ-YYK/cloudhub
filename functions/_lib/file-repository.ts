@@ -20,6 +20,8 @@ export interface FileRecord {
   md5?: string | null
   purged_at?: string | null
   storage_account_id?: number | null
+  enc?: number
+  wrapped_key?: string | null
 }
 
 export interface NewDirectory {
@@ -28,6 +30,7 @@ export interface NewDirectory {
   parentId: string | null
   name: string
   nameKey: string
+  enc: number
   createdAt: string
   updatedAt: string
 }
@@ -42,6 +45,8 @@ export interface NewPendingFile {
   sizeBytes: number
   mimeType: string | null
   storageAccountId: number
+  enc: number
+  wrappedKey: string
   createdAt: string
   updatedAt: string
 }
@@ -78,6 +83,13 @@ export class FileRepositoryConflictError extends Error {
   }
 }
 
+export class FileRepositoryIdConflictError extends Error {
+  constructor() {
+    super('file_repository_id_conflict')
+    this.name = 'FileRepositoryIdConflictError'
+  }
+}
+
 export interface FileRepository {
   listChildren(ownerId: string, parentId: string | null): Promise<FileRecord[]>
   listVisibleChildren(ownerId: string, parentId: string | null): Promise<FileRecord[]>
@@ -109,6 +121,8 @@ export interface MoveRepository {
     name: string,
     nameKey: string,
     parentId: string | null,
+    enc: number,
+    wrappedKey: string | null,
     updatedAt: string,
   ): Promise<FileRecord | null>
 }
@@ -129,6 +143,8 @@ export interface TrashItem {
   parent_name: string | null
   item_count: number | null
   storage_account_id: number | null
+  enc?: number
+  wrapped_key?: string | null
 }
 
 export interface TrashRepository {

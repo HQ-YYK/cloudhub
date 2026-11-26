@@ -1,4 +1,5 @@
 import type { D1Database } from '@cloudflare/workers-types'
+import { FILE_RECORD_COLUMNS } from './e2ee-files.ts'
 import {
   FileRepositoryConflictError,
   type FileRecord,
@@ -120,8 +121,7 @@ export function createD1FileTreeRepository(db: D1Database): FolderDeleteReposito
       if (result.meta.changes === 0) return null
 
       const restored = await db.prepare(`
-        SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
-               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status
+        SELECT ${FILE_RECORD_COLUMNS}
         FROM files
         WHERE id = ? AND owner_id = ?
         LIMIT 1

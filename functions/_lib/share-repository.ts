@@ -20,6 +20,8 @@ export interface ShareWithFileRecord extends ShareRecord {
   file_storage_status: string
   file_kind: string
   file_storage_account_id: number | null
+  file_enc: number
+  file_wrapped_key: string | null
 }
 
 export interface ShareFileInfo {
@@ -31,6 +33,8 @@ export interface ShareFileInfo {
   deleted_at: string | null
   storage_status: string
   kind: string
+  enc: number
+  wrapped_key: string | null
 }
 
 export interface NewShare {

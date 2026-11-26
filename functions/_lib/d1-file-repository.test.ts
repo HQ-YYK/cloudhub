@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { D1Database } from '@cloudflare/workers-types'
 import { createD1FileRepository } from './d1-file-repository.ts'
-import { FileRepositoryConflictError } from './file-repository.ts'
+import { FileRepositoryConflictError, FileRepositoryIdConflictError } from './file-repository.ts'
 
 function databaseWithInsertError(message: string) {
   return {
@@ -68,6 +68,7 @@ const directory = {
   parentId: null,
   name: 'Documents',
   nameKey: 'documents',
+  enc: 1,
   createdAt: '2030-01-01T00:00:00.000Z',
   updatedAt: '2030-01-01T00:00:00.000Z',
 }
@@ -81,11 +82,10 @@ test('maps only the active-name unique index error to a repository conflict', as
   )
 })
 
-test('does not map foreign-key, check, or other unique errors to a name conflict', async () => {
+test('does not map foreign-key or check errors to a name conflict', async () => {
   for (const message of [
     'FOREIGN KEY constraint failed',
     'CHECK constraint failed: files.kind',
-    'UNIQUE constraint failed: files.id',
   ]) {
     await assert.rejects(
       () => createD1FileRepository(databaseWithInsertError(message)).createDirectory(directory),
@@ -94,6 +94,13 @@ test('does not map foreign-key, check, or other unique errors to a name conflict
         && error.message === message,
     )
   }
+})
+
+test('maps a primary-key collision to an id conflict', async () => {
+  await assert.rejects(
+    () => createD1FileRepository(databaseWithInsertError('UNIQUE constraint failed: files.id')).createDirectory(directory),
+    (error: unknown) => error instanceof FileRepositoryIdConflictError,
+  )
 })
 
 test('returns null for an atomic storage update that changes no rows', async () => {

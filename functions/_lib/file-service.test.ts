@@ -79,8 +79,10 @@ function fileRepository(initial: FileRecord[] = []): FileRepository & { records:
         created_at: input.createdAt,
         updated_at: input.updatedAt,
         deleted_at: null,
-          storage_status: 'ready',
-        }
+        storage_status: 'ready',
+        enc: input.enc,
+        wrapped_key: null,
+      }
       records.push(record)
       return record
     },
@@ -109,6 +111,16 @@ const request = new Request('https://cloudhub.test/api/files', {
   headers: { Cookie: 'cloudhub_session=valid-token' },
 })
 
+function makeDirectory(
+  repository: FileRepository,
+  auth: AuthRepository,
+  parentId: string | null,
+  name: string,
+  nameKey = name.toLocaleLowerCase('en-US'),
+) {
+  return createDirectory(auth, repository, request, parentId, crypto.randomUUID(), name, nameKey)
+}
+
 test('normalizes names and rejects unsafe names', () => {
   assert.deepEqual(normalizeFileName('  Documents  '), {
     name: 'Documents',
@@ -133,24 +145,25 @@ test('users who must change password cannot list files', async () => {
 
 test('creates root and child directories, while enforcing ownership', async () => {
   const repository = fileRepository()
-  const root = await createDirectory(authRepository(), repository, request, null, 'Documents')
+  const root = await makeDirectory(repository, authRepository(), null, 'Documents')
   assert.equal(root.parent_id, null)
-  const child = await createDirectory(authRepository(), repository, request, root.id, 'Notes')
+  const child = await makeDirectory(repository, authRepository(), root.id, 'Notes')
   assert.equal(child.parent_id, root.id)
   await assert.rejects(
-    () => createDirectory(authRepository(otherOwner), repository, request, root.id, 'Private'),
+    () => makeDirectory(repository, authRepository(otherOwner), root.id, 'Private'),
     (error: unknown) => error instanceof FileServiceError && error.code === 'invalid_parent',
   )
 })
 
 test('lists only direct children for the authenticated owner', async () => {
   const repository = fileRepository()
-  const root = await createDirectory(authRepository(), repository, request, null, 'Root')
-  await createDirectory(authRepository(), repository, request, root.id, 'Child')
-  await createDirectory(authRepository(), repository, request, null, 'Sibling')
+  const root = await makeDirectory(repository, authRepository(), null, 'Root')
+  await makeDirectory(repository, authRepository(), root.id, 'Child')
+  await makeDirectory(repository, authRepository(), null, 'Sibling')
   const items = await listFiles(authRepository(), repository, request, root.id)
   assert.deepEqual(items.map((item) => item.name), ['Child'])
   assert.ok(items.every((item) => !Object.hasOwn(publicFileRecord(item), 'object_key')))
+  assert.ok(items.every((item) => publicFileRecord(item).enc === 1))
 })
 
 test('visible lists include directories and ready files, but hide other storage states', async () => {
@@ -169,24 +182,26 @@ test('visible lists include directories and ready files, but hide other storage 
       updated_at: '2030-01-01T00:00:00.000Z',
       deleted_at: null,
       storage_status,
+      enc: 0,
+      wrapped_key: null,
     })),
   ])
-  await createDirectory(authRepository(), repository, request, null, 'Documents')
+  await makeDirectory(repository, authRepository(), null, 'Documents')
   const visible = await listFiles(authRepository(), repository, request, null)
   assert.deepEqual(visible.map((item) => item.name).sort(), ['Documents', 'ready.bin'])
 })
 
 test('enforces active case-insensitive names but permits different parents and soft-deleted names', async () => {
   const repository = fileRepository()
-  const root = await createDirectory(authRepository(), repository, request, null, 'Root')
+  const root = await makeDirectory(repository, authRepository(), null, 'Root')
   await assert.rejects(
-    () => createDirectory(authRepository(), repository, request, null, 'root'),
+    () => makeDirectory(repository, authRepository(), null, 'root'),
     (error: unknown) => error instanceof FileServiceError && error.code === 'conflict',
   )
-  const child = await createDirectory(authRepository(), repository, request, root.id, 'root')
+  const child = await makeDirectory(repository, authRepository(), root.id, 'root')
   assert.equal(child.parent_id, root.id)
   repository.records[0].deleted_at = '2030-01-01T00:00:00.000Z'
-  const replacement = await createDirectory(authRepository(), repository, request, null, 'ROOT')
+  const replacement = await makeDirectory(repository, authRepository(), null, 'ROOT')
   assert.equal(replacement.parent_id, null)
 })
 
@@ -205,6 +220,8 @@ test('storage transitions enforce the state machine and owner isolation', async 
     updated_at: '2030-01-01T00:00:00.000Z',
     deleted_at: null,
     storage_status: 'pending',
+    enc: 0,
+    wrapped_key: null,
   }])
   const { transitionFileStorage } = await import('./file-service.ts')
   const ready = await transitionFileStorage(

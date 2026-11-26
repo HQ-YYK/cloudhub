@@ -4,13 +4,21 @@ import { BlobStoreError } from './blob-store.ts'
 import type { AuthEnv } from './cloudflare-env.ts'
 import { ensureUserFolder } from './drive-folders.ts'
 import {
+  CIPHER_CHUNK_SIZE,
+  isValidCipherSize,
+  isValidE2eeId,
+  isValidEncName,
+  isValidNameKey,
+  isValidWrappedKey,
+  PLAIN_CHUNK_SIZE,
+} from './e2ee-files.ts'
+import {
   FileRepositoryConflictError,
+  FileRepositoryIdConflictError,
   type FileRepository,
   type UploadRepository,
 } from './file-repository.ts'
 import {
-  FileServiceError,
-  normalizeFileName,
   publicFileRecord,
   validateFileId,
 } from './file-service.ts'
@@ -19,9 +27,10 @@ import { decryptSecret, encryptSecret } from './secret-box.ts'
 import type { StorageAccount, StorageRepository } from './storage-repository.ts'
 import { selectStorageAccount, StorageFullError } from './storage-selector.ts'
 
-export const CHUNK_SIZE = 32 * 1024 * 1024
+export const CHUNK_SIZE = CIPHER_CHUNK_SIZE
 export const CHUNK_ALIGNMENT = 256 * 1024
 export const MAX_FILE_SIZE = 10 * 1024 ** 3
+const MAX_CIPHER_SIZE = MAX_FILE_SIZE + 28 * Math.ceil(MAX_FILE_SIZE / PLAIN_CHUNK_SIZE)
 
 const SESSION_TTL_MS = 6 * 24 * 60 * 60 * 1000
 const RESUME_ENDPOINT = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,size,md5Checksum'
@@ -36,6 +45,7 @@ export type UploadErrorCode =
   | 'invalid_chunk'
   | 'not_found'
   | 'conflict'
+  | 'id_conflict'
   | 'offset_mismatch'
   | 'upload_expired'
   | 'size_mismatch'
@@ -83,10 +93,12 @@ export interface UploadServiceDeps {
 }
 
 export interface CreateUploadBody {
+  id?: unknown
   parentId?: unknown
-  name?: unknown
+  encName?: unknown
+  nameKey?: unknown
+  wrappedKey?: unknown
   size?: unknown
-  mimeType?: unknown
 }
 
 export interface UploadCreated {
@@ -140,18 +152,11 @@ export function createUploadService(deps: UploadServiceDeps) {
   async function create(request: Request, body: CreateUploadBody): Promise<UploadCreated> {
     const user = await authenticated(request)
 
-    let name: string
-    let nameKey: string
-    try {
-      const normalized = normalizeFileName(body.name)
-      name = normalized.name
-      nameKey = normalized.nameKey
-    } catch (error) {
-      if (error instanceof FileServiceError && error.code === 'invalid_name') {
-        throw new UploadServiceError('invalid_name')
-      }
-      throw error
-    }
+    if (!isValidE2eeId(body.id)) throw new UploadServiceError('invalid_request')
+    if (!isValidEncName(body.encName)) throw new UploadServiceError('invalid_request')
+    if (!isValidNameKey(body.nameKey)) throw new UploadServiceError('invalid_request')
+    if (!isValidWrappedKey(body.wrappedKey)) throw new UploadServiceError('invalid_request')
+    const fileId = body.id
 
     let parentId: string | null = null
     if (body.parentId !== undefined && body.parentId !== null) {
@@ -169,20 +174,10 @@ export function createUploadService(deps: UploadServiceDeps) {
     }
 
     const size = body.size
-    if (typeof size !== 'number' || !Number.isSafeInteger(size)) {
-      throw new UploadServiceError('invalid_size')
-    }
-    if (size === 0) throw new UploadServiceError('empty_file')
-    if (size < 1 || size > MAX_FILE_SIZE) throw new UploadServiceError('invalid_size')
+    if (!isValidCipherSize(size)) throw new UploadServiceError('invalid_size')
+    if (size > MAX_CIPHER_SIZE) throw new UploadServiceError('invalid_size')
 
-    let mimeType: string | null = null
-    const rawMime = body.mimeType
-    if (rawMime !== undefined && rawMime !== null) {
-      const valid = typeof rawMime === 'string'
-        && rawMime.length <= 255
-        && /^[-\w.+]+\/[-\w.+]+$/u.test(rawMime)
-      mimeType = valid ? rawMime : 'application/octet-stream'
-    }
+    const mimeType = 'application/octet-stream'
 
     let account: StorageAccount
     try {
@@ -198,7 +193,6 @@ export function createUploadService(deps: UploadServiceDeps) {
       throw storageError(error)
     }
 
-    const fileId = crypto.randomUUID()
     const createdAt = now().toISOString()
 
     try {
@@ -206,16 +200,19 @@ export function createUploadService(deps: UploadServiceDeps) {
         id: fileId,
         ownerId: user.id,
         parentId,
-        name,
-        nameKey,
+        name: body.encName,
+        nameKey: body.nameKey,
         objectKey: null,
         sizeBytes: size,
         mimeType,
         storageAccountId: account.id,
+        enc: 1,
+        wrappedKey: body.wrappedKey,
         createdAt,
         updatedAt: createdAt,
       })
     } catch (error) {
+      if (error instanceof FileRepositoryIdConflictError) throw new UploadServiceError('id_conflict')
       if (error instanceof FileRepositoryConflictError) throw new UploadServiceError('conflict')
       throw error
     }
@@ -239,10 +236,10 @@ export function createUploadService(deps: UploadServiceDeps) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Upload-Content-Type': mimeType ?? 'application/octet-stream',
+          'X-Upload-Content-Type': mimeType,
           'X-Upload-Content-Length': String(size),
         },
-        body: JSON.stringify({ name, parents: [folderId] }),
+        body: JSON.stringify({ name: fileId, parents: [folderId] }),
       }, account.id)
       if (!response.ok) throw new BlobStoreError('unavailable', 'google_drive_resume_create_failed')
       sessionUri = response.headers.get('Location') ?? ''

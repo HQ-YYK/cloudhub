@@ -14,6 +14,10 @@ const ownerId = randomUUID()
 const otherOwnerId = randomUUID()
 const sentinelId = randomUUID()
 const sentinelFileId = randomUUID()
+const cascadeId = randomUUID()
+const cascadeFileId = randomUUID()
+const cascadeShareId = randomUUID()
+const cascadeUsername = `file-test-cascade-${randomUUID()}`
 const ownerUsername = `file-test-owner-${randomUUID()}`
 const otherOwnerUsername = `file-test-other-${randomUUID()}`
 const sentinelUsername = `file-test-sentinel-${randomUUID()}`
@@ -143,9 +147,9 @@ test.before(() => {
 test.after(() => {
   runWrangler(`
     DELETE FROM files
-    WHERE owner_id IN ('${ownerId}', '${otherOwnerId}') AND parent_id IS NOT NULL;
+    WHERE owner_id IN ('${ownerId}', '${otherOwnerId}', '${cascadeId}') AND parent_id IS NOT NULL;
     DELETE FROM files
-    WHERE owner_id IN ('${ownerId}', '${otherOwnerId}') AND parent_id IS NULL
+    WHERE owner_id IN ('${ownerId}', '${otherOwnerId}', '${cascadeId}') AND parent_id IS NULL
   `)
   const sentinel = runWrangler(`
     SELECT COUNT(*) AS count
@@ -155,29 +159,73 @@ test.after(() => {
   assert.equal(sentinel.count, 1)
   runWrangler(`DELETE FROM files WHERE owner_id = '${sentinelId}'`)
   runWrangler(`DELETE FROM storage_accounts WHERE google_email = 'integration@example.com'`)
-  runWrangler(`DELETE FROM users WHERE id IN ('${ownerId}', '${otherOwnerId}', '${sentinelId}')`)
+  runWrangler(`DELETE FROM users WHERE id IN ('${ownerId}', '${otherOwnerId}', '${cascadeId}', '${sentinelId}')`)
+})
+
+test('rebuild keeps shares and upload_sessions foreign keys cascading from files', () => {
+  runWrangler(`
+    INSERT OR IGNORE INTO users (
+      id, username, password_hash, password_salt, password_iterations, disabled, created_at, updated_at
+    ) VALUES (
+      '${cascadeId}', '${cascadeUsername}', 'x', 'x', 100000, 0, '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z'
+    );
+    INSERT INTO files (
+      id, owner_id, parent_id, kind, name, name_key, object_key, size_bytes, mime_type,
+      created_at, updated_at, deleted_at, storage_status, enc, wrapped_key
+    ) VALUES (
+      '${cascadeFileId}', '${cascadeId}', NULL, 'file', 'x', 'x', 'objects/cascade', 28,
+      'application/octet-stream', '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z', NULL,
+      'ready', 1, 'wrapped'
+    );
+    INSERT INTO shares (
+      id, owner_id, file_id, token_hash, token_ciphertext, token_iv, expires_at, revoked_at, download_count, created_at
+    ) VALUES (
+      '${cascadeShareId}', '${cascadeId}', '${cascadeFileId}', 't', 'c', 'i', NULL, NULL, 0, '2030-01-01T00:00:00.000Z'
+    );
+    INSERT INTO upload_sessions (
+      file_id, owner_id, session_uri_ciphertext, session_uri_iv, total_bytes, received_bytes, created_at, updated_at, expires_at
+    ) VALUES (
+      '${cascadeFileId}', '${cascadeId}', 'c', 'i', 28, 0, '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z', '2030-01-10T00:00:00.000Z'
+    )
+  `)
+
+  const beforeDelete = runWrangler(`
+    SELECT
+      (SELECT COUNT(*) FROM shares WHERE file_id = '${cascadeFileId}') AS share_count,
+      (SELECT COUNT(*) FROM upload_sessions WHERE file_id = '${cascadeFileId}') AS session_count
+  `)[0]?.results?.[0] as { share_count: number, session_count: number }
+  assert.deepEqual(beforeDelete, { share_count: 1, session_count: 1 })
+
+  runWrangler(`DELETE FROM files WHERE id = '${cascadeFileId}'`)
+
+  const afterDelete = runWrangler(`
+    SELECT
+      (SELECT COUNT(*) FROM shares WHERE file_id = '${cascadeFileId}') AS share_count,
+      (SELECT COUNT(*) FROM upload_sessions WHERE file_id = '${cascadeFileId}') AS session_count
+  `)[0]?.results?.[0] as { share_count: number, session_count: number }
+  assert.deepEqual(afterDelete, { share_count: 0, session_count: 0 })
 })
 
 test('local D1 enforces ownership, direct children, soft-delete reuse, and active name uniqueness', async () => {
   cleanup()
   const repository = createD1FileRepository(database())
   const root = await repository.createDirectory({
-    id: randomUUID(), ownerId, parentId: null, name: 'Documents', nameKey: 'documents',
+    id: randomUUID(), ownerId, parentId: null, name: 'Documents', nameKey: 'documents', enc: 1,
     createdAt: '2030-01-01T00:00:00.000Z', updatedAt: '2030-01-01T00:00:00.000Z',
   })
   const child = await repository.createDirectory({
-    id: randomUUID(), ownerId, parentId: root.id, name: 'Notes', nameKey: 'notes',
+    id: randomUUID(), ownerId, parentId: root.id, name: 'Notes', nameKey: 'notes', enc: 1,
     createdAt: '2030-01-01T00:00:00.000Z', updatedAt: '2030-01-01T00:00:00.000Z',
   })
   assert.equal((await repository.listChildren(ownerId, root.id))[0]?.id, child.id)
   assert.equal(await repository.findDirectory(otherOwnerId, root.id), null)
   await assert.rejects(() => repository.createDirectory({
-    id: randomUUID(), ownerId, parentId: null, name: 'documents', nameKey: 'documents',
+    id: randomUUID(), ownerId, parentId: null, name: 'documents', nameKey: 'documents', enc: 1,
     createdAt: '2030-01-01T00:00:00.000Z', updatedAt: '2030-01-01T00:00:00.000Z',
   }), (error: unknown) => error instanceof FileRepositoryConflictError)
   runWrangler(`UPDATE files SET deleted_at = '2030-01-02T00:00:00.000Z' WHERE id = '${root.id}'`)
   await repository.createDirectory({
-    id: randomUUID(), ownerId, parentId: null, name: 'DOCUMENTS', nameKey: 'documents',
+    id: randomUUID(), ownerId, parentId: null, name: 'DOCUMENTS', nameKey: 'documents', enc: 1,
     createdAt: '2030-01-03T00:00:00.000Z', updatedAt: '2030-01-03T00:00:00.000Z',
   })
 })
@@ -215,6 +263,8 @@ test('local D1 tracks file storage states, permits failed-name retry, and isolat
     sizeBytes: 7,
     mimeType: 'application/octet-stream',
     storageAccountId: 1,
+    enc: 1,
+    wrappedKey: 'wrapped-key',
     createdAt: '2030-01-01T00:00:00.000Z',
     updatedAt: '2030-01-01T00:00:00.000Z',
   }
@@ -269,6 +319,8 @@ test('soft-deleted files are hidden and cannot transition again', async () => {
     sizeBytes: 0,
     mimeType: null,
     storageAccountId: 1,
+    enc: 1,
+    wrappedKey: 'wrapped-key',
     createdAt: '2030-01-01T00:00:00.000Z',
     updatedAt: '2030-01-01T00:00:00.000Z',
   })

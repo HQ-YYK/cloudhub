@@ -7,6 +7,7 @@ import {
 } from './file-storage-state.ts'
 import {
   FileRepositoryConflictError,
+  FileRepositoryIdConflictError,
   type FileRecord,
   type FileRepository,
   type FolderDeleteRepository,
@@ -28,6 +29,7 @@ export class FileServiceError extends Error {
     | 'cleanup_failed'
     | 'delete_failed'
     | 'conflict'
+    | 'id_conflict'
     | 'password_change_required'
     | 'folder_too_large'
     | 'folder_busy'
@@ -90,7 +92,9 @@ export async function createDirectory(
   fileRepository: FileRepository,
   request: Request,
   parentId: string | null,
-  rawName: unknown,
+  id: string,
+  encName: string,
+  nameKey: string,
 ) {
   const user = await getAuthenticatedUser(authRepository, request)
   if (!user) throw new FileServiceError('unauthorized')
@@ -101,18 +105,19 @@ export async function createDirectory(
     if (!parent) throw new FileServiceError('invalid_parent')
   }
 
-  const { name, nameKey } = normalizeFileName(rawName)
   try {
     return await fileRepository.createDirectory({
-      id: crypto.randomUUID(),
+      id,
       ownerId: user.id,
       parentId,
-      name,
+      name: encName,
       nameKey,
+      enc: 1,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     })
   } catch (error) {
+    if (error instanceof FileRepositoryIdConflictError) throw new FileServiceError('id_conflict')
     if (error instanceof FileRepositoryConflictError) throw new FileServiceError('conflict')
     throw error
   }
@@ -241,7 +246,7 @@ export async function deleteItem(
 }
 
 export function publicFileRecord(
-  record: Pick<FileRecord, 'id' | 'parent_id' | 'kind' | 'name' | 'size_bytes' | 'mime_type' | 'created_at' | 'updated_at'>,
+  record: Pick<FileRecord, 'id' | 'parent_id' | 'kind' | 'name' | 'size_bytes' | 'mime_type' | 'created_at' | 'updated_at' | 'enc' | 'wrapped_key'>,
 ) {
   return {
     id: record.id,
@@ -252,5 +257,7 @@ export function publicFileRecord(
     mime_type: record.mime_type,
     created_at: record.created_at,
     updated_at: record.updated_at,
+    enc: record.enc ?? 0,
+    wrappedKey: record.wrapped_key ?? null,
   }
 }
