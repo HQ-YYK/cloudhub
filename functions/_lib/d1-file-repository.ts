@@ -396,10 +396,9 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
           AND deleted_at IS NOT NULL
           AND purged_at IS NULL
           AND deleted_at > ?
-          AND object_key IS NOT NULL
         ORDER BY deleted_at ASC
         LIMIT ?
-      `).bind(ownerId, cutoff, limit).all<{ id: string, object_key: string, storage_account_id: number | null }>().then((result) => result.results)
+      `).bind(ownerId, cutoff, limit).all<{ id: string, object_key: string | null, storage_account_id: number | null }>().then((result) => result.results)
     },
 
     async countTrash(ownerId, cutoff) {

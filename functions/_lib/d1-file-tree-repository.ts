@@ -160,10 +160,9 @@ export function createD1FileTreeRepository(db: D1Database): FolderDeleteReposito
           AND kind = 'file'
           AND deleted_at = ?
           AND purged_at IS NULL
-          AND object_key IS NOT NULL
         ORDER BY id ASC
         LIMIT ?
-      `).bind(ownerId, deletedAt, limit).all<{ id: string, object_key: string, storage_account_id: number | null }>().then((result) => result.results)
+      `).bind(ownerId, deletedAt, limit).all<{ id: string, object_key: string | null, storage_account_id: number | null }>().then((result) => result.results)
     },
 
     async countBatchFiles(ownerId, deletedAt) {

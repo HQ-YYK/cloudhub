@@ -121,3 +121,37 @@ test('empty loops until remaining reaches 0', async () => {
     globalThis.fetch = original
   }
 })
+
+test('purge folder surfaces the storage error with the purged and remaining counts', async () => {
+  const original = globalThis.fetch
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    purged: 2,
+    remaining: 5,
+    error: 'storage_reauth_required',
+  }), { headers: { 'Content-Type': 'application/json' } })
+  try {
+    assert.deepEqual(
+      await purgeTrashItem('folder/id'),
+      { purged: 2, remaining: 5, error: 'storage_reauth_required' },
+    )
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('empty surfaces the storage error instead of silently stopping', async () => {
+  const original = globalThis.fetch
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    purged: 0,
+    remaining: 3,
+    error: 'storage_not_connected',
+  }), { headers: { 'Content-Type': 'application/json' } })
+  try {
+    assert.deepEqual(
+      await emptyTrash(),
+      { purged: 0, remaining: 3, error: 'storage_not_connected' },
+    )
+  } finally {
+    globalThis.fetch = original
+  }
+})

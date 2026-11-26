@@ -37,6 +37,16 @@ function requestErrorMessage(error: unknown): string {
   return '操作失败，请稍后重试。'
 }
 
+function purgeError(error: string | undefined, remaining: number): string {
+  if (error === 'storage_reauth_required') {
+    return 'Google 账号授权已失效，请管理员到「存储」页重新授权后再删除。'
+  }
+  if (error === 'storage_not_connected') {
+    return '部分文件所在的 Google 账号已移除，无法删除。'
+  }
+  return `还有 ${remaining} 项没有删掉，请稍后重试。`
+}
+
 function formatFileSize(size: number | null) {
   if (size === null) return '大小未知'
   if (size < 1024) return `${size} B`
@@ -160,7 +170,7 @@ export default function TrashBin() {
     try {
       const result = await purgeTrashItem(item.id, (done) => setPurgeProgress(done))
       if (result.remaining > 0) {
-        setActionError('存储暂时不可用，请稍后重试。')
+        setActionError(purgeError(result.error, result.remaining))
       } else {
         setItems((previous) => previous.filter((entry) => entry.id !== item.id))
       }
@@ -175,13 +185,18 @@ export default function TrashBin() {
 
   async function handleEmpty() {
     const count = items.length
-    if (!window.confirm(`确定永久删除回收站里的全部 ${count} 个文件吗？此操作无法撤销。`)) return
+    if (!window.confirm(`确定永久删除回收站里的全部 ${count} 项吗？此操作无法撤销。`)) return
     setEmptying(true)
     setActionError('')
     setNotice('')
     try {
-      await emptyTrash()
+      const result = await emptyTrash()
       await loadTrash('refresh')
+      if (result.remaining > 0) {
+        setActionError(purgeError(result.error, result.remaining))
+      } else {
+        setNotice('回收站已清空。')
+      }
     } catch (error) {
       setActionError(requestErrorMessage(error))
     } finally {

@@ -261,10 +261,10 @@ function makeTrashRepository(initial: FileRecord[] = []) {
     },
     async listTrashObjectKeys(ownerId, cutoff, limit) {
       return records
-        .filter((record) => isTrashed(record, ownerId, cutoff) && record.kind === 'file' && record.object_key !== null)
+        .filter((record) => isTrashed(record, ownerId, cutoff) && record.kind === 'file')
         .sort((a, b) => (a.deleted_at! < b.deleted_at! ? -1 : 1))
         .slice(0, limit)
-        .map((record) => ({ id: record.id, object_key: record.object_key!, storage_account_id: record.storage_account_id ?? null }))
+        .map((record) => ({ id: record.id, object_key: record.object_key, storage_account_id: record.storage_account_id ?? null }))
     },
     async countTrash(ownerId, cutoff) {
       return records.filter((record) => isTrashed(record, ownerId, cutoff) && record.kind === 'file').length
@@ -274,11 +274,10 @@ function makeTrashRepository(initial: FileRecord[] = []) {
         .filter((record) => record.owner_id === ownerId
           && record.kind === 'file'
           && record.deleted_at === deletedAt
-          && (record.purged_at === null || record.purged_at === undefined)
-          && record.object_key !== null)
+          && (record.purged_at === null || record.purged_at === undefined))
         .sort((a, b) => (a.id < b.id ? -1 : 1))
         .slice(0, limit)
-        .map((record) => ({ id: record.id, object_key: record.object_key!, storage_account_id: record.storage_account_id ?? null }))
+        .map((record) => ({ id: record.id, object_key: record.object_key, storage_account_id: record.storage_account_id ?? null }))
     },
     async countBatchFiles(ownerId, deletedAt) {
       return records.filter((record) => record.owner_id === ownerId
@@ -547,7 +546,7 @@ test('clear stops at the first storage failure and keeps already-purged files', 
   const response = await run(createTrashHandler(overrides), clearRequest())
 
   assert.equal(response.status, 200)
-  assert.deepEqual(await response.json(), { purged: 2, remaining: 43 })
+  assert.deepEqual(await response.json(), { purged: 2, remaining: 43, error: 'storage_unavailable' })
   assert.deepEqual(deletedPermanently, ['objects/file-0', 'objects/file-1'])
 })
 
@@ -696,4 +695,107 @@ test('restore folder keeps failed files failed and leaves Drive-trashed files in
   assert.equal(records.find((record) => record.id === failed.id)?.storage_status, 'failed')
   assert.equal(records.find((record) => record.id === failed.id)?.deleted_at, null)
   assert.notEqual(records.find((record) => record.id === single.id)?.deleted_at, null)
+})
+
+test('purge one deletes a null-object_key file without calling Drive', async () => {
+  const { overrides, records, deletedPermanently } = buildOverrides({
+    records: [trashed({ object_key: null, storage_status: 'failed' })],
+  })
+  const response = await run(createTrashItemHandler(overrides), purgeRequest(), { id: fileId })
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { purged: true })
+  assert.deepEqual(deletedPermanently, [])
+  assert.equal(records.some((record) => record.id === fileId), false)
+})
+
+test('purge one reports storage_reauth_required on Drive auth failure', async () => {
+  const { overrides, records, deleteErrors } = buildOverrides({ records: [trashed()] })
+  deleteErrors.set(objectKey, new BlobStoreError('unavailable', 'storage_reauth_required'))
+  const response = await run(createTrashItemHandler(overrides), purgeRequest(), { id: fileId })
+
+  assert.equal(response.status, 503)
+  assert.deepEqual(await response.json(), { error: 'storage_reauth_required' })
+  assert.equal(records.some((record) => record.id === fileId), true)
+})
+
+test('purge folder deletes null-object_key files without calling Drive', async () => {
+  const folder = trashedFolder()
+  const child = trashed({
+    id: crypto.randomUUID(),
+    parent_id: folder.id,
+    name: 'a.txt',
+    name_key: 'a.txt',
+    object_key: null,
+    storage_status: 'failed',
+    deleted_at: folder.deleted_at,
+  })
+
+  const { overrides, deletedPermanently, records } = buildOverrides({ records: [folder, child] })
+  const response = await run(createTrashItemHandler(overrides), purgeRequest(folder.id), { id: folder.id })
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { purged: 1, remaining: 0 })
+  assert.deepEqual(deletedPermanently, [])
+  assert.equal(records.length, 0)
+})
+
+test('purge folder stops and reports storage_unavailable on Drive failure', async () => {
+  const folder = trashedFolder()
+  const files = Array.from({ length: 3 }, (_, index) => fileRecord({
+    id: crypto.randomUUID(),
+    parent_id: folder.id,
+    name: `f-${index}.txt`,
+    name_key: `f-${index}.txt`,
+    object_key: `objects/f-${index}`,
+    deleted_at: folder.deleted_at,
+  }))
+
+  const { overrides, deleteErrors, records } = buildOverrides({ records: [folder, ...files] })
+  deleteErrors.set('objects/f-1', new BlobStoreError('unavailable', 'drive_down'))
+  const response = await run(createTrashItemHandler(overrides), purgeRequest(folder.id), { id: folder.id })
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { purged: 1, remaining: 2, error: 'storage_unavailable' })
+  assert.equal(records.some((record) => record.id === folder.id), true)
+})
+
+test('clear deletes null-object_key files without calling Drive', async () => {
+  const { overrides, deletedPermanently, records } = buildOverrides({
+    records: [trashed({ object_key: null, storage_status: 'failed' })],
+  })
+  const response = await run(createTrashHandler(overrides), clearRequest())
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { purged: 1, remaining: 0 })
+  assert.deepEqual(deletedPermanently, [])
+  assert.equal(records.length, 0)
+})
+
+test('clear treats a Drive 404 as success', async () => {
+  const { overrides, records, deleteErrors } = buildOverrides({ records: [trashed()] })
+  deleteErrors.set(objectKey, new BlobStoreError('not_found', 'drive_object_not_found'))
+  const response = await run(createTrashHandler(overrides), clearRequest())
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { purged: 1, remaining: 0 })
+  assert.equal(records.length, 0)
+})
+
+test('clear reports storage_reauth_required when Drive authorization is gone', async () => {
+  const { overrides, deleteErrors } = buildOverrides({ records: [trashed()] })
+  deleteErrors.set(objectKey, new BlobStoreError('unavailable', 'storage_reauth_required'))
+  const response = await run(createTrashHandler(overrides), clearRequest())
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { purged: 0, remaining: 1, error: 'storage_reauth_required' })
+})
+
+test('clear reports storage_not_connected when the account is gone', async () => {
+  const { overrides, deleteErrors } = buildOverrides({ records: [trashed()] })
+  deleteErrors.set(objectKey, new BlobStoreError('unavailable', 'storage_not_connected'))
+  const response = await run(createTrashHandler(overrides), clearRequest())
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { purged: 0, remaining: 1, error: 'storage_not_connected' })
 })
