@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { FilesRequestError, listFiles, moveItem, type DriveItem } from '../api/files'
-import { resolveDisplayName } from '../files/session'
+import { FilesRequestError, moveItem, type DriveItem } from '../api/files'
+import { listCache } from '../files/list-cache'
 
 interface MoveDialogProps {
   item: DriveItem
@@ -87,13 +87,8 @@ function FolderRow({ node, depth, selectedId, disabledId, masterKey, onSelect }:
     if (children === null) {
       setLoading(true)
       try {
-        const items = await listFiles(node.id)
-        const folders = items.filter((entry) => entry.kind === 'directory')
-        const children = await Promise.all(folders.map(async (entry) => {
-          const display = await resolveDisplayName(masterKey, entry)
-          return { id: entry.id, name: display.name }
-        }))
-        setChildren(children)
+        const entries = listCache.get(node.id) ?? await listCache.loadFresh(node.id, masterKey)
+        setChildren(entries.filter((entry) => entry.item.kind === 'directory').map((entry) => ({ id: entry.item.id, name: entry.name })))
       } catch {
         setChildren([])
       } finally {
@@ -167,6 +162,7 @@ export default function MoveDialog({ item, displayName, parentName, masterKey, o
     setMoving(true)
     try {
       await moveItem(item.id, selectedId)
+      listCache.invalidateMove(item.parent_id, selectedId)
       onMoved()
     } catch (error) {
       onError(moveErrorMessage(error))

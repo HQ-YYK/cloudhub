@@ -26,7 +26,7 @@ export function createD1AuthRepository(db: D1Database): AuthRepository {
     async findSessionUser(tokenHash: string, now: string) {
       return db.prepare(`
         SELECT s.id AS session_id, u.id, u.username, u.role, u.must_change_password,
-               u.kdf_salt, u.wrapped_master_key
+               u.kdf_salt, u.wrapped_master_key, s.last_seen_at
         FROM sessions s
         INNER JOIN users u ON u.id = s.user_id
         WHERE s.token_hash = ?

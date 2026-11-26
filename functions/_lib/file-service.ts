@@ -12,6 +12,7 @@ import {
   type FileRepository,
   type FolderDeleteRepository,
 } from './file-repository.ts'
+import type { ServerTiming } from './server-timing.ts'
 
 export const FILE_NAME_MAX_LENGTH = 255
 
@@ -75,8 +76,10 @@ export async function listFiles(
   fileRepository: FileRepository,
   request: Request,
   parentId: string | null,
+  timing?: ServerTiming,
 ) {
   const user = await getAuthenticatedUser(authRepository, request)
+  timing?.mark('auth')
   if (!user) throw new FileServiceError('unauthorized')
   if (user.mustChangePassword) throw new FileServiceError('password_change_required')
   if (parentId !== null) {
@@ -84,7 +87,9 @@ export async function listFiles(
     const parent = await fileRepository.findDirectory(user.id, parentId)
     if (!parent) throw new FileServiceError('invalid_parent')
   }
-  return fileRepository.listVisibleChildren(user.id, parentId)
+  const items = await fileRepository.listVisibleChildren(user.id, parentId)
+  timing?.mark('db')
+  return items
 }
 
 export async function createDirectory(
@@ -95,8 +100,10 @@ export async function createDirectory(
   id: string,
   encName: string,
   nameKey: string,
+  timing?: ServerTiming,
 ) {
   const user = await getAuthenticatedUser(authRepository, request)
+  timing?.mark('auth')
   if (!user) throw new FileServiceError('unauthorized')
   if (user.mustChangePassword) throw new FileServiceError('password_change_required')
   if (parentId !== null) {
@@ -106,7 +113,7 @@ export async function createDirectory(
   }
 
   try {
-    return await fileRepository.createDirectory({
+    const item = await fileRepository.createDirectory({
       id,
       ownerId: user.id,
       parentId,
@@ -116,6 +123,8 @@ export async function createDirectory(
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     })
+    timing?.mark('db')
+    return item
   } catch (error) {
     if (error instanceof FileRepositoryIdConflictError) throw new FileServiceError('id_conflict')
     if (error instanceof FileRepositoryConflictError) throw new FileServiceError('conflict')
