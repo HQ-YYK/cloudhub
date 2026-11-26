@@ -2,6 +2,7 @@ import type { PagesFunction } from '@cloudflare/workers-types'
 import { createD1AuthRepository } from '../../_lib/d1-auth-repository.ts'
 import type { AuthEnv } from '../../_lib/cloudflare-env.ts'
 import { createD1FileRepository } from '../../_lib/d1-file-repository.ts'
+import { isValidE2eeId, isValidEncName, isValidNameKey } from '../../_lib/e2ee-files.ts'
 import { createDirectory, FileServiceError, publicFileRecord } from '../../_lib/file-service.ts'
 import { jsonResponse, methodNotAllowed, sameOriginRequest } from '../../_lib/http.ts'
 
@@ -10,6 +11,7 @@ function serviceErrorResponse(error: FileServiceError) {
   if (error.code === 'password_change_required') return jsonResponse({ error: 'password_change_required' }, 403)
   if (error.code === 'invalid_name') return jsonResponse({ error: 'invalid_name' }, 400)
   if (error.code === 'invalid_parent') return jsonResponse({ error: 'not_found' }, 404)
+  if (error.code === 'id_conflict') return jsonResponse({ error: 'id_conflict' }, 409)
   return jsonResponse({ error: 'conflict' }, 409)
 }
 
@@ -21,19 +23,25 @@ export const onRequest: PagesFunction<AuthEnv> = async (context) => {
   const fileRepository = createD1FileRepository(context.env.DB)
 
   try {
-    let body: { parent_id?: unknown; name?: unknown }
+    let body: { parent_id?: unknown; name?: unknown; id?: unknown; encName?: unknown; nameKey?: unknown }
     try {
       const parsed: unknown = await context.request.json()
       if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
         return jsonResponse({ error: 'invalid_request' }, 400)
       }
-      body = parsed as { parent_id?: unknown; name?: unknown }
+      body = parsed as { parent_id?: unknown; name?: unknown; id?: unknown; encName?: unknown; nameKey?: unknown }
     } catch {
+      return jsonResponse({ error: 'invalid_request' }, 400)
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'name')) {
       return jsonResponse({ error: 'invalid_request' }, 400)
     }
     const parentId = body.parent_id === null || body.parent_id === undefined ? null : body.parent_id
     if (parentId !== null && typeof parentId !== 'string') return jsonResponse({ error: 'invalid_request' }, 400)
-    const item = await createDirectory(authRepository, fileRepository, context.request, parentId, body.name)
+    if (!isValidE2eeId(body.id) || !isValidEncName(body.encName) || !isValidNameKey(body.nameKey)) {
+      return jsonResponse({ error: 'invalid_request' }, 400)
+    }
+    const item = await createDirectory(authRepository, fileRepository, context.request, parentId, body.id, body.encName, body.nameKey)
     return jsonResponse({ item: publicFileRecord(item) }, 201)
   } catch (error) {
     if (error instanceof FileServiceError) return serviceErrorResponse(error)

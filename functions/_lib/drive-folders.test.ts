@@ -137,8 +137,8 @@ test('creates nested directory folders on demand and persists each mapping', asy
   const result = await ensureDriveFolder(driveClient, storageRepository, repository, ownerId, 'child')
   assert.equal(result, 'folder-2')
   assert.deepEqual(created, [
-    { name: 'Parent', parentId: 'user-folder' },
-    { name: 'Child', parentId: 'folder-1' },
+    { name: 'parent', parentId: 'user-folder' },
+    { name: 'child', parentId: 'folder-1' },
   ])
   assert.equal(directories.parent.drive_folder_id, 'folder-1')
   assert.equal(directories.child.drive_folder_id, 'folder-2')

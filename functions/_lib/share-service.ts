@@ -36,6 +36,9 @@ export interface ShareView {
   id: string
   fileId: string
   fileName: string
+  enc: number
+  encName: string
+  wrappedKey: string | null
   url: string
   expiresAt: string | null
   revokedAt: string | null
@@ -45,7 +48,10 @@ export interface ShareView {
 }
 
 export interface PublicShareMetadata {
-  name: string
+  id: string
+  enc: number
+  name?: string
+  encName?: string
   sizeBytes: number | null
   mimeType: string | null
   expiresAt: string | null
@@ -84,7 +90,14 @@ function isFileShareable(file: ShareFileInfo) {
 
 function buildShareView(
   record: ShareRecord,
-  file: { name: string; deleted_at: string | null; storage_status: string; kind: string },
+  file: {
+    name: string
+    deleted_at: string | null
+    storage_status: string
+    kind: string
+    enc: number
+    wrapped_key: string | null
+  },
   token: string,
   origin: string,
   now: string,
@@ -93,6 +106,9 @@ function buildShareView(
     id: record.id,
     fileId: record.file_id,
     fileName: file.name,
+    enc: file.enc,
+    encName: file.name,
+    wrappedKey: file.wrapped_key,
     url: `${origin}/s/${token}`,
     expiresAt: record.expires_at,
     revokedAt: record.revoked_at,
@@ -126,6 +142,8 @@ async function decryptShareViews(
       deleted_at: record.file_deleted_at,
       storage_status: record.file_storage_status,
       kind: record.file_kind,
+      enc: record.file_enc,
+      wrapped_key: record.file_wrapped_key,
     }, token, origin, now))
   }
   return views
@@ -174,6 +192,8 @@ export async function createShare(
     deleted_at: file.deleted_at,
     storage_status: file.storage_status,
     kind: file.kind,
+    enc: file.enc,
+    wrapped_key: file.wrapped_key,
   }, token, new URL(request.url).origin, now)
 }
 
@@ -236,7 +256,19 @@ export async function getPublicShareMetadata(
   if (!isValidShareToken(token)) throw new ShareServiceError('not_found')
   const record = await shareRepository.findActiveByTokenHash(await sha256Hex(token), now)
   if (!record) throw new ShareServiceError('not_found')
+  if (record.file_enc === 1) {
+    return {
+      id: record.file_id,
+      enc: 1,
+      encName: record.file_name,
+      sizeBytes: record.file_size_bytes,
+      mimeType: record.file_mime_type,
+      expiresAt: record.expires_at,
+    }
+  }
   return {
+    id: record.file_id,
+    enc: 0,
     name: record.file_name,
     sizeBytes: record.file_size_bytes,
     mimeType: record.file_mime_type,
@@ -291,12 +323,17 @@ export async function streamPublicShare(
     await shareRepository.incrementDownloadCount(record.id)
   }
 
-  const contentType = normalizeMimeType(blob.contentType ?? record.file_mime_type) ?? 'application/octet-stream'
-  const inline = new URL(request.url).searchParams.get('inline') === '1'
+  const encrypted = record.file_enc === 1
+  const contentType = encrypted
+    ? 'application/octet-stream'
+    : (normalizeMimeType(blob.contentType ?? record.file_mime_type) ?? 'application/octet-stream')
+  const inline = !encrypted && new URL(request.url).searchParams.get('inline') === '1'
   const renderInline = inline && allowsInlineContentType(contentType)
-  const disposition = renderInline
-    ? contentDisposition(record.file_name, 'inline')
-    : contentDisposition(record.file_name)
+  const disposition = encrypted
+    ? 'attachment'
+    : (renderInline
+      ? contentDisposition(record.file_name, 'inline')
+      : contentDisposition(record.file_name))
 
   const headers = new Headers({
     'Cache-Control': 'private, no-store',

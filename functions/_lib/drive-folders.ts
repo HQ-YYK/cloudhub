@@ -87,7 +87,7 @@ export async function ensureDriveFolder(
     ownerId,
     directory.parent_id,
   )
-  const folderId = await client.createFolder(directory.name, parentFolderId, 1)
+  const folderId = await client.createFolder(directory.id, parentFolderId, 1)
   return settleFolder(
     client,
     folderId,

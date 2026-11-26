@@ -1,6 +1,8 @@
 import type { D1Database } from '@cloudflare/workers-types'
+import { FILE_RECORD_COLUMNS } from './e2ee-files.ts'
 import {
   FileRepositoryConflictError,
+  FileRepositoryIdConflictError,
   type FileRecord,
   type FileRepository,
   type MoveRepository,
@@ -17,37 +19,40 @@ function isActiveNameConflict(error: unknown) {
   return /unique constraint failed: index ['"]?idx_files_active_name['"]?/iu.test(message)
 }
 
+function isIdConflict(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  return /UNIQUE constraint failed: files\.id\b/u.test(message)
+    || /PRIMARY KEY constraint failed/u.test(message)
+}
+
 export function createD1FileRepository(db: D1Database): FileRepository & UploadRepository & TrashRepository & MoveRepository {
   return {
     async listChildren(ownerId, parentId) {
       return db.prepare(`
-        SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
-               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status
+        SELECT ${FILE_RECORD_COLUMNS}
         FROM files
         WHERE owner_id = ?
           AND parent_id IS ?
           AND deleted_at IS NULL
-        ORDER BY kind DESC, name_key ASC, id ASC
+        ORDER BY id ASC
       `).bind(ownerId, parentId).all<FileRecord>().then((result) => result.results)
     },
 
     async listVisibleChildren(ownerId, parentId) {
       return db.prepare(`
-        SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
-               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status
+        SELECT ${FILE_RECORD_COLUMNS}
         FROM files
         WHERE owner_id = ?
           AND parent_id IS ?
           AND deleted_at IS NULL
           AND (kind = 'directory' OR storage_status = 'ready')
-        ORDER BY kind DESC, name_key ASC, id ASC
+        ORDER BY id ASC
       `).bind(ownerId, parentId).all<FileRecord>().then((result) => result.results)
     },
 
     async findDirectory(ownerId, id) {
       return db.prepare(`
-        SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
-               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status
+        SELECT ${FILE_RECORD_COLUMNS}
         FROM files
         WHERE id = ?
           AND owner_id = ?
@@ -62,8 +67,9 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
         await db.prepare(`
           INSERT INTO files (
             id, owner_id, parent_id, kind, name, name_key, object_key,
-            size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status
-          ) VALUES (?, ?, ?, 'directory', ?, ?, NULL, NULL, NULL, ?, ?, NULL, 'ready')
+            size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status,
+            enc, wrapped_key
+          ) VALUES (?, ?, ?, 'directory', ?, ?, NULL, NULL, NULL, ?, ?, NULL, 'ready', ?, NULL)
         `).bind(
           input.id,
           input.ownerId,
@@ -72,15 +78,16 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
           input.nameKey,
           input.createdAt,
           input.updatedAt,
+          input.enc,
         ).run()
       } catch (error) {
+        if (isIdConflict(error)) throw new FileRepositoryIdConflictError()
         if (isActiveNameConflict(error)) throw new FileRepositoryConflictError()
         throw error
       }
 
       const created = await db.prepare(`
-        SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
-               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status
+        SELECT ${FILE_RECORD_COLUMNS}
         FROM files
         WHERE id = ? AND owner_id = ?
         LIMIT 1
@@ -91,9 +98,7 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
 
     async findFile(ownerId, id) {
       return db.prepare(`
-        SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
-               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status,
-               storage_account_id
+        SELECT ${FILE_RECORD_COLUMNS}
         FROM files
         WHERE id = ?
           AND owner_id = ?
@@ -109,8 +114,8 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
           INSERT INTO files (
             id, owner_id, parent_id, kind, name, name_key, object_key,
             size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status,
-            storage_account_id
-          ) VALUES (?, ?, ?, 'file', ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', ?)
+            storage_account_id, enc, wrapped_key
+          ) VALUES (?, ?, ?, 'file', ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', ?, ?, ?)
         `).bind(
           input.id,
           input.ownerId,
@@ -123,16 +128,17 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
           input.createdAt,
           input.updatedAt,
           input.storageAccountId,
+          input.enc,
+          input.wrappedKey,
         ).run()
       } catch (error) {
+        if (isIdConflict(error)) throw new FileRepositoryIdConflictError()
         if (isActiveNameConflict(error)) throw new FileRepositoryConflictError()
         throw error
       }
 
       const created = await db.prepare(`
-        SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
-               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status,
-               storage_account_id
+        SELECT ${FILE_RECORD_COLUMNS}
         FROM files
         WHERE id = ? AND owner_id = ?
         LIMIT 1
@@ -155,8 +161,7 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
       if (result.meta.changes !== 1) throw new Error('unexpected_file_storage_update_count')
 
       const updated = await db.prepare(`
-        SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
-               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status
+        SELECT ${FILE_RECORD_COLUMNS}
         FROM files
         WHERE id = ? AND owner_id = ?
         LIMIT 1
@@ -179,8 +184,7 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
       if (result.meta.changes !== 1) throw new Error('unexpected_file_soft_delete_count')
 
       const deleted = await db.prepare(`
-        SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
-               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status
+        SELECT ${FILE_RECORD_COLUMNS}
         FROM files
         WHERE id = ? AND owner_id = ?
         LIMIT 1
@@ -191,9 +195,7 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
 
     async findItem(ownerId, id) {
       return db.prepare(`
-        SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
-               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status,
-               drive_folder_id, md5, storage_account_id
+        SELECT ${FILE_RECORD_COLUMNS}
         FROM files
         WHERE id = ?
           AND owner_id = ?
@@ -225,16 +227,16 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
       return row !== null
     },
 
-    async updateNameAndParent(ownerId, id, name, nameKey, parentId, updatedAt) {
+    async updateNameAndParent(ownerId, id, name, nameKey, parentId, enc, wrappedKey, updatedAt) {
       let result
       try {
         result = await db.prepare(`
           UPDATE files
-          SET name = ?, name_key = ?, parent_id = ?, updated_at = ?
+          SET name = ?, name_key = ?, parent_id = ?, enc = ?, wrapped_key = ?, updated_at = ?
           WHERE id = ?
             AND owner_id = ?
             AND deleted_at IS NULL
-        `).bind(name, nameKey, parentId, updatedAt, id, ownerId).run()
+        `).bind(name, nameKey, parentId, enc, wrappedKey, updatedAt, id, ownerId).run()
       } catch (error) {
         if (isActiveNameConflict(error)) throw new FileRepositoryConflictError()
         throw error
@@ -243,9 +245,7 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
       if (result.meta.changes !== 1) throw new Error('unexpected_file_move_update_count')
 
       const updated = await db.prepare(`
-        SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
-               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status,
-               drive_folder_id, md5
+        SELECT ${FILE_RECORD_COLUMNS}
         FROM files
         WHERE id = ? AND owner_id = ?
         LIMIT 1
@@ -258,7 +258,7 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
       return db.prepare(`
         SELECT f.id, f.owner_id, f.parent_id, f.kind, f.name, f.name_key, f.object_key,
                f.size_bytes, f.mime_type, f.created_at, f.updated_at, f.deleted_at,
-               f.storage_account_id,
+               f.storage_account_id, f.enc, f.wrapped_key,
                parent.name AS parent_name,
                CASE WHEN f.kind = 'directory' THEN (
                  SELECT COUNT(*)
@@ -289,7 +289,7 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
       return db.prepare(`
         SELECT f.id, f.owner_id, f.parent_id, f.kind, f.name, f.name_key, f.object_key,
                f.size_bytes, f.mime_type, f.created_at, f.updated_at, f.deleted_at,
-               f.storage_account_id,
+               f.storage_account_id, f.enc, f.wrapped_key,
                parent.name AS parent_name,
                CASE WHEN f.kind = 'directory' THEN (
                  SELECT COUNT(*)
@@ -343,8 +343,7 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
       if (result.meta.changes !== 1) throw new Error('unexpected_file_restore_count')
 
       const restored = await db.prepare(`
-        SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
-               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status
+        SELECT ${FILE_RECORD_COLUMNS}
         FROM files
         WHERE id = ? AND owner_id = ?
         LIMIT 1
@@ -522,8 +521,7 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
       if (result.meta.changes !== 1) throw new Error('unexpected_file_complete_count')
 
       const completed = await db.prepare(`
-        SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
-               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status
+        SELECT ${FILE_RECORD_COLUMNS}
         FROM files
         WHERE id = ? AND owner_id = ?
         LIMIT 1
@@ -544,8 +542,7 @@ export function createD1FileRepository(db: D1Database): FileRepository & UploadR
       if (result.meta.changes === 0) return null
 
       const failed = await db.prepare(`
-        SELECT id, owner_id, parent_id, kind, name, name_key, object_key,
-               size_bytes, mime_type, created_at, updated_at, deleted_at, storage_status
+        SELECT ${FILE_RECORD_COLUMNS}
         FROM files
         WHERE id = ? AND owner_id = ?
         LIMIT 1

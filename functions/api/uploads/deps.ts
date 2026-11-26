@@ -64,6 +64,7 @@ export function uploadErrorResponse(error: UploadServiceError) {
   if (error.code === 'password_change_required') return jsonResponse({ error: 'password_change_required' }, 403)
   if (error.code === 'not_found') return jsonResponse({ error: 'not_found' }, 404)
   if (error.code === 'conflict') return jsonResponse({ error: 'conflict' }, 409)
+  if (error.code === 'id_conflict') return jsonResponse({ error: 'id_conflict' }, 409)
   if (error.code === 'offset_mismatch') {
     return jsonResponse({ error: 'offset_mismatch', receivedBytes: error.receivedBytes }, 409)
   }

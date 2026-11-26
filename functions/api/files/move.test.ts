@@ -21,6 +21,9 @@ const folderId = '44444444-4444-4444-8444-444444444444'
 const childFolderId = '55555555-5555-4555-8555-555555555555'
 const targetFolderId = '66666666-6666-4666-8666-666666666666'
 const otherFileId = '77777777-7777-4777-8777-777777777777'
+const ENC_NAME = 'A'.repeat(44)
+const NAME_KEY = 'A'.repeat(43)
+const WRAPPED_KEY = 'A'.repeat(80)
 
 function authRepository(user = owner): AuthRepository {
   return {
@@ -59,6 +62,8 @@ function fileRecord(overrides: Partial<FileRecord> = {}): FileRecord {
     storage_status: 'ready',
     drive_folder_id: null,
     md5: null,
+    enc: 1,
+    wrapped_key: WRAPPED_KEY,
     ...overrides,
   }
 }
@@ -80,6 +85,8 @@ function folderRecord(overrides: Partial<FileRecord> = {}): FileRecord {
     storage_status: 'ready',
     drive_folder_id: null,
     md5: null,
+    enc: 1,
+    wrapped_key: null,
     ...overrides,
   }
 }
@@ -102,7 +109,7 @@ function makeRepository(initial: FileRecord[], options: { conflictOnUpdate?: boo
       }
       return false
     },
-    updateNameAndParent: async (ownerId, id, name, nameKey, parentId, updatedAt) => {
+    updateNameAndParent: async (ownerId, id, name, nameKey, parentId, enc, wrappedKey, updatedAt) => {
       if (options.conflictOnUpdate) throw new FileRepositoryConflictError()
       const record = files.find(
         (candidate) => candidate.owner_id === ownerId && candidate.id === id && !candidate.deleted_at,
@@ -120,6 +127,8 @@ function makeRepository(initial: FileRecord[], options: { conflictOnUpdate?: boo
       record.name = name
       record.name_key = nameKey
       record.parent_id = parentId
+      record.enc = enc
+      record.wrapped_key = wrappedKey
       record.updated_at = updatedAt
       return { ...record }
     },
@@ -252,15 +261,25 @@ async function run(handler: ReturnType<typeof createPatchHandler>, request: Requ
   return handler({ request, env: environment, params: { id } } as never)
 }
 
-test('renames a file with a Drive PATCH and updates D1', async () => {
+test('renames a file in D1 without touching Drive', async () => {
   const { handler, files, updateCalls } = buildHandler({ files: [fileRecord()] })
-  const response = await run(handler, patchRequest(fileId, { name: 'renamed.txt' }), env())
+  const response = await run(handler, patchRequest(fileId, { encName: ENC_NAME, nameKey: NAME_KEY }), env())
   assert.equal(response.status, 200)
-  const payload = await response.json() as { item: { name: string } }
-  assert.equal(payload.item.name, 'renamed.txt')
-  assert.deepEqual(updateCalls, [{ id: 'drive-file-1', patch: { name: 'renamed.txt' } }])
-  assert.equal(files[0].name, 'renamed.txt')
-  assert.equal(files[0].name_key, 'renamed.txt')
+  const payload = await response.json() as { item: { name: string, enc: number } }
+  assert.equal(payload.item.name, ENC_NAME)
+  assert.equal(payload.item.enc, 1)
+  assert.deepEqual(updateCalls, [])
+  assert.equal(files[0].name, ENC_NAME)
+  assert.equal(files[0].name_key, NAME_KEY)
+  assert.equal(files[0].enc, 1)
+})
+
+test('rejects renaming a legacy unencrypted file with legacy_file', async () => {
+  const { handler, updateCalls } = buildHandler({ files: [fileRecord({ enc: 0, wrapped_key: null })] })
+  const response = await run(handler, patchRequest(fileId, { encName: ENC_NAME, nameKey: NAME_KEY }), env())
+  assert.equal(response.status, 409)
+  assert.deepEqual(await response.json(), { error: 'legacy_file' })
+  assert.deepEqual(updateCalls, [])
 })
 
 test('moves a file between folders and back to the root', async () => {
@@ -283,29 +302,29 @@ test('moves a file between folders and back to the root', async () => {
   assert.equal(files[0].parent_id, null)
 })
 
-test('renames a folder without a Drive folder locally and with one via Drive', async () => {
+test('renames a folder in D1 only, regardless of its Drive folder', async () => {
   const local = buildHandler({ files: [folderRecord({ drive_folder_id: null })] })
-  const localResponse = await run(local.handler, patchRequest(folderId, { name: 'Renamed' }), env(), folderId)
+  const localResponse = await run(local.handler, patchRequest(folderId, { encName: ENC_NAME, nameKey: NAME_KEY }), env(), folderId)
   assert.equal(localResponse.status, 200)
   assert.deepEqual(local.updateCalls, [])
-  assert.equal(local.files[0].name, 'Renamed')
+  assert.equal(local.files[0].name, ENC_NAME)
 
   const withDrive = buildHandler({ files: [folderRecord({ drive_folder_id: 'drive-folder' })] })
-  const driveResponse = await run(withDrive.handler, patchRequest(folderId, { name: 'Renamed' }), env(), folderId)
+  const driveResponse = await run(withDrive.handler, patchRequest(folderId, { encName: ENC_NAME, nameKey: NAME_KEY }), env(), folderId)
   assert.equal(driveResponse.status, 200)
-  assert.deepEqual(withDrive.updateCalls, [{ id: 'drive-folder', patch: { name: 'Renamed' } }])
+  assert.deepEqual(withDrive.updateCalls, [])
 })
 
-test('renames and moves in a single Drive PATCH', async () => {
+test('renames and moves in a single Drive PATCH that only moves', async () => {
   const target = folderRecord({ id: targetFolderId, name: 'Target', name_key: 'target', drive_folder_id: 'target-folder' })
   const { handler, files, updateCalls } = buildHandler({ files: [fileRecord(), target] })
-  const response = await run(handler, patchRequest(fileId, { name: 'new.txt', parentId: targetFolderId }), env())
+  const response = await run(handler, patchRequest(fileId, { encName: ENC_NAME, nameKey: NAME_KEY, parentId: targetFolderId }), env())
   assert.equal(response.status, 200)
   assert.deepEqual(updateCalls, [{
     id: 'drive-file-1',
-    patch: { name: 'new.txt', addParents: 'target-folder', removeParents: 'old-parent' },
+    patch: { addParents: 'target-folder', removeParents: 'old-parent' },
   }])
-  assert.equal(files[0].name, 'new.txt')
+  assert.equal(files[0].name, ENC_NAME)
   assert.equal(files[0].parent_id, targetFolderId)
 })
 
@@ -319,29 +338,30 @@ test('rejects moving a folder into its own descendant', async () => {
 })
 
 test('rejects a name conflict before touching Drive', async () => {
-  const clash = fileRecord({ id: otherFileId, name: 'clash.txt', name_key: 'clash.txt' })
+  const clash = fileRecord({ id: otherFileId, name: 'clash', name_key: NAME_KEY })
   const { handler, updateCalls } = buildHandler({ files: [fileRecord(), clash] })
-  const response = await run(handler, patchRequest(fileId, { name: 'clash.txt' }), env())
+  const response = await run(handler, patchRequest(fileId, { encName: ENC_NAME, nameKey: NAME_KEY }), env())
   assert.equal(response.status, 409)
   assert.deepEqual(await response.json(), { error: 'conflict' })
   assert.deepEqual(updateCalls, [])
 })
 
-test('rolls back Drive when the D1 update hits the unique index', async () => {
-  const { handler, files, updateCalls } = buildHandler({ files: [fileRecord()], conflictOnUpdate: true })
-  const response = await run(handler, patchRequest(fileId, { name: 'renamed.txt' }), env())
+test('rolls back the Drive move when the D1 update hits the unique index', async () => {
+  const target = folderRecord({ id: targetFolderId, name: 'Target', name_key: 'target', drive_folder_id: 'target-folder' })
+  const { handler, files, updateCalls } = buildHandler({ files: [fileRecord(), target], conflictOnUpdate: true })
+  const response = await run(handler, patchRequest(fileId, { parentId: targetFolderId }), env())
   assert.equal(response.status, 409)
   assert.deepEqual(await response.json(), { error: 'conflict' })
   assert.deepEqual(updateCalls, [
-    { id: 'drive-file-1', patch: { name: 'renamed.txt' } },
-    { id: 'drive-file-1', patch: { name: 'report.txt' } },
+    { id: 'drive-file-1', patch: { addParents: 'target-folder', removeParents: 'old-parent' } },
+    { id: 'drive-file-1', patch: { addParents: 'old-parent', removeParents: 'target-folder' } },
   ])
-  assert.equal(files[0].name, 'report.txt')
+  assert.equal(files[0].parent_id, null)
 })
 
-test('returns the current record without Drive when nothing changes', async () => {
+test('returns the current record without Drive when the parent does not change', async () => {
   const { handler, updateCalls, parentQueries } = buildHandler({ files: [fileRecord({ parent_id: folderId })] })
-  const response = await run(handler, patchRequest(fileId, { name: 'report.txt', parentId: folderId }), env())
+  const response = await run(handler, patchRequest(fileId, { parentId: folderId }), env())
   assert.equal(response.status, 200)
   const payload = await response.json() as { item: { name: string; parent_id: string } }
   assert.equal(payload.item.name, 'report.txt')
@@ -352,7 +372,7 @@ test('returns the current record without Drive when nothing changes', async () =
 
 test('rejects a file that is not ready', async () => {
   const { handler, updateCalls } = buildHandler({ files: [fileRecord({ storage_status: 'pending' })] })
-  const response = await run(handler, patchRequest(fileId, { name: 'x.txt' }), env())
+  const response = await run(handler, patchRequest(fileId, { encName: ENC_NAME, nameKey: NAME_KEY }), env())
   assert.equal(response.status, 409)
   assert.deepEqual(await response.json(), { error: 'not_ready' })
   assert.deepEqual(updateCalls, [])
@@ -360,20 +380,30 @@ test('rejects a file that is not ready', async () => {
 
 test('hides foreign files and rejects cross-origin requests', async () => {
   const foreign = buildHandler({ files: [fileRecord({ owner_id: otherOwner.id })] })
-  const foreignResponse = await run(foreign.handler, patchRequest(fileId, { name: 'x.txt' }), env())
+  const foreignResponse = await run(foreign.handler, patchRequest(fileId, { encName: ENC_NAME, nameKey: NAME_KEY }), env())
   assert.equal(foreignResponse.status, 404)
 
   const cross = buildHandler({ files: [fileRecord()] })
-  const crossResponse = await run(cross.handler, patchRequest(fileId, { name: 'x.txt' }, { Origin: 'https://attacker.test' }), env())
+  const crossResponse = await run(cross.handler, patchRequest(fileId, { encName: ENC_NAME, nameKey: NAME_KEY }, { Origin: 'https://attacker.test' }), env())
   assert.equal(crossResponse.status, 403)
   assert.deepEqual(await crossResponse.json(), { error: 'forbidden' })
 })
 
-test('rejects invalid names', async () => {
+test('rejects plaintext names and invalid encName/nameKey', async () => {
   const { handler, updateCalls } = buildHandler({ files: [fileRecord()] })
-  const response = await run(handler, patchRequest(fileId, { name: 'a/b' }), env())
-  assert.equal(response.status, 400)
-  assert.deepEqual(await response.json(), { error: 'invalid_name' })
+
+  const plaintext = await run(handler, patchRequest(fileId, { name: 'a.txt' }), env())
+  assert.equal(plaintext.status, 400)
+  assert.deepEqual(await plaintext.json(), { error: 'invalid_request' })
+
+  const badEncName = await run(handler, patchRequest(fileId, { encName: 'not base64!', nameKey: NAME_KEY }), env())
+  assert.equal(badEncName.status, 400)
+  assert.deepEqual(await badEncName.json(), { error: 'invalid_request' })
+
+  const badNameKey = await run(handler, patchRequest(fileId, { encName: ENC_NAME, nameKey: 'short' }), env())
+  assert.equal(badNameKey.status, 400)
+  assert.deepEqual(await badNameKey.json(), { error: 'invalid_request' })
+
   assert.deepEqual(updateCalls, [])
 })
 
@@ -397,4 +427,8 @@ test('rejects an empty or malformed body', async () => {
   const badParent = await run(handler, patchRequest(fileId, { parentId: 42 }), env())
   assert.equal(badParent.status, 400)
   assert.deepEqual(await badParent.json(), { error: 'invalid_request' })
+
+  const missingNameKey = await run(handler, patchRequest(fileId, { encName: ENC_NAME }), env())
+  assert.equal(missingNameKey.status, 400)
+  assert.deepEqual(await missingNameKey.json(), { error: 'invalid_request' })
 })

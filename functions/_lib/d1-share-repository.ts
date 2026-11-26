@@ -15,7 +15,8 @@ const SHARE_WITH_FILE_COLUMNS = `
   f.name AS file_name, f.size_bytes AS file_size_bytes,
   f.mime_type AS file_mime_type, f.object_key AS file_object_key,
   f.deleted_at AS file_deleted_at, f.storage_status AS file_storage_status,
-  f.kind AS file_kind, f.storage_account_id AS file_storage_account_id
+  f.kind AS file_kind, f.storage_account_id AS file_storage_account_id,
+  f.enc AS file_enc, f.wrapped_key AS file_wrapped_key
 `
 
 export function createD1ShareRepository(db: D1Database): ShareRepository {
@@ -76,7 +77,7 @@ export function createD1ShareRepository(db: D1Database): ShareRepository {
 
     async findFileForShare(ownerId, fileId) {
       return db.prepare(`
-        SELECT id, name, size_bytes, mime_type, object_key, deleted_at, storage_status, kind
+        SELECT id, name, size_bytes, mime_type, object_key, deleted_at, storage_status, kind, enc, wrapped_key
         FROM files
         WHERE id = ? AND owner_id = ?
         LIMIT 1

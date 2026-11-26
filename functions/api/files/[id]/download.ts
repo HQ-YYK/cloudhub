@@ -97,12 +97,17 @@ export function createDownloadHandler(
         return unavailableResponse()
       }
 
-      const contentType = normalizeMimeType(blob.contentType ?? record.mime_type) ?? 'application/octet-stream'
-      const inline = new URL(context.request.url).searchParams.get('inline') === '1'
+      const encrypted = record.enc === 1
+      const contentType = encrypted
+        ? 'application/octet-stream'
+        : (normalizeMimeType(blob.contentType ?? record.mime_type) ?? 'application/octet-stream')
+      const inline = !encrypted && new URL(context.request.url).searchParams.get('inline') === '1'
       const renderInline = inline && allowsInlineContentType(contentType)
-      const disposition = renderInline
-        ? contentDisposition(record.name, 'inline')
-        : contentDisposition(record.name)
+      const disposition = encrypted
+        ? 'attachment'
+        : (renderInline
+          ? contentDisposition(record.name, 'inline')
+          : contentDisposition(record.name))
 
       const headers = new Headers({
         'Cache-Control': 'private, no-store',

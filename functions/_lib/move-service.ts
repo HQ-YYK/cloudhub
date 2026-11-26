@@ -2,6 +2,7 @@ import { getAuthenticatedUser } from './auth.ts'
 import type { AuthRepository } from './auth-repository.ts'
 import { BlobStoreError } from './blob-store.ts'
 import { ensureDriveFolder, type DriveFolderClient } from './drive-folders.ts'
+import { isValidEncName, isValidNameKey } from './e2ee-files.ts'
 import {
   FileRepositoryConflictError,
   type FileRecord,
@@ -10,8 +11,6 @@ import {
   type UploadRepository,
 } from './file-repository.ts'
 import {
-  FileServiceError,
-  normalizeFileName,
   publicFileRecord,
   validateFileId,
 } from './file-service.ts'
@@ -24,6 +23,7 @@ export type MoveErrorCode =
   | 'invalid_name'
   | 'not_found'
   | 'conflict'
+  | 'legacy_file'
   | 'invalid_move'
   | 'not_ready'
   | 'storage_unavailable'
@@ -45,7 +45,8 @@ export interface MoveDriveClient extends DriveFolderClient {
 }
 
 export interface MovePatch {
-  name?: unknown
+  encName?: unknown
+  nameKey?: unknown
   parentId?: unknown
 }
 
@@ -59,7 +60,6 @@ export interface MoveServiceDeps {
 
 interface DriveChange {
   driveId: string
-  nameChanged: boolean
   parentChanged: boolean
   newParentDriveId: string | null
   oldParentDriveId: string | null
@@ -78,8 +78,6 @@ export function createMoveService(deps: MoveServiceDeps) {
   async function driveChange(
     ownerId: string,
     record: FileRecord,
-    name: string,
-    nameChanged: boolean,
     parentId: string | null,
     parentChanged: boolean,
   ): Promise<DriveChange | null> {
@@ -93,29 +91,26 @@ export function createMoveService(deps: MoveServiceDeps) {
       if (record.kind === 'directory') return null
       throw new MoveServiceError('storage_unavailable')
     }
+    if (!parentChanged) return null
 
     const change: DriveChange = {
       driveId,
-      nameChanged,
       parentChanged,
       newParentDriveId: null,
       oldParentDriveId: null,
     }
-    if (parentChanged) {
-      change.newParentDriveId = await ensureDriveFolder(
-        deps.driveClient,
-        deps.storageRepository,
-        deps.fileRepository,
-        ownerId,
-        parentId,
-      )
-      const parents = await deps.driveClient.getParents(driveId)
-      change.oldParentDriveId = parents[0] ?? null
-    }
+    change.newParentDriveId = await ensureDriveFolder(
+      deps.driveClient,
+      deps.storageRepository,
+      deps.fileRepository,
+      ownerId,
+      parentId,
+    )
+    const parents = await deps.driveClient.getParents(driveId)
+    change.oldParentDriveId = parents[0] ?? null
     await deps.driveClient.updateFile(driveId, {
-      ...(nameChanged ? { name } : {}),
-      ...(parentChanged && change.newParentDriveId ? { addParents: change.newParentDriveId } : {}),
-      ...(parentChanged && change.oldParentDriveId ? { removeParents: change.oldParentDriveId } : {}),
+      ...(change.newParentDriveId ? { addParents: change.newParentDriveId } : {}),
+      ...(change.oldParentDriveId ? { removeParents: change.oldParentDriveId } : {}),
     })
     return change
   }
@@ -123,25 +118,22 @@ export function createMoveService(deps: MoveServiceDeps) {
   async function applyDriveChange(
     ownerId: string,
     record: FileRecord,
-    name: string,
-    nameChanged: boolean,
     parentId: string | null,
     parentChanged: boolean,
   ): Promise<DriveChange | null> {
     try {
-      return await driveChange(ownerId, record, name, nameChanged, parentId, parentChanged)
+      return await driveChange(ownerId, record, parentId, parentChanged)
     } catch (error) {
       throw mapDriveError(error)
     }
   }
 
-  async function rollbackDrive(record: FileRecord, change: DriveChange | null) {
+  async function rollbackDrive(change: DriveChange | null) {
     if (!change) return
     try {
       await deps.driveClient.updateFile(change.driveId, {
-        ...(change.nameChanged ? { name: record.name } : {}),
-        ...(change.parentChanged && change.oldParentDriveId ? { addParents: change.oldParentDriveId } : {}),
-        ...(change.parentChanged && change.newParentDriveId ? { removeParents: change.newParentDriveId } : {}),
+        ...(change.oldParentDriveId ? { addParents: change.oldParentDriveId } : {}),
+        ...(change.newParentDriveId ? { removeParents: change.newParentDriveId } : {}),
       })
     } catch {
       // Best-effort rollback; the D1 error we return matters more.
@@ -168,17 +160,18 @@ export function createMoveService(deps: MoveServiceDeps) {
 
     let name = record.name
     let nameKey = record.name_key
-    if (body.name !== undefined) {
-      try {
-        const normalized = normalizeFileName(body.name)
-        name = normalized.name
-        nameKey = normalized.nameKey
-      } catch (error) {
-        if (error instanceof FileServiceError && error.code === 'invalid_name') {
-          throw new MoveServiceError('invalid_name')
-        }
-        throw error
+    let enc = record.enc ?? 0
+    const nameChanged = body.encName !== undefined
+    if (nameChanged) {
+      if (record.kind === 'file' && (record.enc ?? 0) === 0) {
+        throw new MoveServiceError('legacy_file')
       }
+      if (!isValidEncName(body.encName) || !isValidNameKey(body.nameKey)) {
+        throw new MoveServiceError('invalid_request')
+      }
+      name = body.encName
+      nameKey = body.nameKey
+      enc = 1
     }
 
     let parentId = record.parent_id
@@ -197,7 +190,6 @@ export function createMoveService(deps: MoveServiceDeps) {
       }
     }
 
-    const nameChanged = name !== record.name
     const parentChanged = parentId !== record.parent_id
 
     if (!nameChanged && !parentChanged) {
@@ -220,7 +212,7 @@ export function createMoveService(deps: MoveServiceDeps) {
       if (conflict) throw new MoveServiceError('conflict')
     }
 
-    const change = await applyDriveChange(user.id, record, name, nameChanged, parentId, parentChanged)
+    const change = await applyDriveChange(user.id, record, parentId, parentChanged)
 
     const updatedAt = now().toISOString()
     try {
@@ -230,13 +222,15 @@ export function createMoveService(deps: MoveServiceDeps) {
         name,
         nameKey,
         parentId,
+        enc,
+        record.wrapped_key ?? null,
         updatedAt,
       )
       if (!updated) throw new MoveServiceError('not_found')
       return publicFileRecord(updated)
     } catch (error) {
       if (error instanceof MoveServiceError) throw error
-      await rollbackDrive(record, change)
+      await rollbackDrive(change)
       if (error instanceof FileRepositoryConflictError) {
         throw new MoveServiceError('conflict', { cause: error })
       }
