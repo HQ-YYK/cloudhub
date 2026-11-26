@@ -1,7 +1,10 @@
 import { FilesRequestError, type DriveItem } from '../api/files'
 import { plainSizeFromCipher } from '../crypto'
+import { platformErrorMessage } from '../utils/service-limits'
 
 export function requestErrorMessage(error: unknown, action: 'list' | 'create' | 'download' | 'delete') {
+  const platform = platformErrorMessage(error)
+  if (platform) return platform
   if (error instanceof FilesRequestError) {
     if (error.code === 'password_change_required') return '请先修改密码'
     if (error.code === 'folder_too_large') return '文件夹内容超过 5000 项，请先分批删除里面的内容'
@@ -27,6 +30,8 @@ export function requestErrorMessage(error: unknown, action: 'list' | 'create' | 
 }
 
 export function renameErrorMessage(error: unknown) {
+  const platform = platformErrorMessage(error)
+  if (platform) return platform
   if (error instanceof FilesRequestError) {
     if (error.code === 'name_conflict' || error.code === 'conflict') return '目标位置已有同名文件或文件夹'
     if (error.code === 'invalid_move') return '不能移动到它自己的子文件夹里'

@@ -1,3 +1,5 @@
+import { classifyPlatformResponse } from '../utils/service-limits.ts'
+
 export type AuthUser = {
   id: string
   username: string
@@ -80,7 +82,8 @@ async function requestAuth<T extends { error?: string } = AuthResponse>(path: st
   try {
     payload = await response.json() as T
   } catch {
-    throw new AuthRequestError(response.status, 'invalid_response')
+    const code = classifyPlatformResponse(response.status, response.headers.get('Content-Type')) ?? 'invalid_response'
+    throw new AuthRequestError(response.status, code)
   }
   if (!response.ok) throw new AuthRequestError(response.status, payload.error ?? 'request_failed')
   return payload

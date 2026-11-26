@@ -1,6 +1,9 @@
 import { SharesRequestError } from '../api/shares'
+import { platformErrorMessage } from '../utils/service-limits'
 
 export function shareErrorMessage(error: unknown): string {
+  const platform = platformErrorMessage(error)
+  if (platform) return platform
   if (error instanceof SharesRequestError) {
     if (error.code === 'too_many_shares') return '这个文件的分享链接已达上限（20 个），请先撤销一些再试。'
     if (error.code === 'password_change_required') return '请先修改密码。'

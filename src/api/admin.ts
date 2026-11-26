@@ -1,3 +1,5 @@
+import { classifyPlatformResponse } from '../utils/service-limits.ts'
+
 export type AdminUser = {
   id: string
   username: string
@@ -63,7 +65,8 @@ async function requestAdmin(path: string, init?: RequestInit): Promise<AdminResp
   try {
     payload = await response.json() as AdminResponse
   } catch {
-    throw new AdminRequestError(response.status, 'invalid_response')
+    const code = classifyPlatformResponse(response.status, response.headers.get('Content-Type')) ?? 'invalid_response'
+    throw new AdminRequestError(response.status, code)
   }
   if (!response.ok) throw new AdminRequestError(response.status, payload.error ?? 'request_failed')
   return payload

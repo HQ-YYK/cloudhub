@@ -3,6 +3,7 @@ import { emptyTrash, listTrash, purgeTrashItem, restoreTrashItem, type TrashItem
 import { FilesRequestError } from '../api/files'
 import { useAuth } from '../auth/useAuth'
 import { resolveDisplayName } from '../files/session'
+import { platformErrorMessage } from '../utils/service-limits'
 import { FolderIcon } from './DriveIcons'
 
 function TrashEmptyIcon() {
@@ -27,6 +28,8 @@ function FileIcon() {
 }
 
 function requestErrorMessage(error: unknown): string {
+  const platform = platformErrorMessage(error)
+  if (platform) return platform
   if (error instanceof FilesRequestError) {
     if (error.status === 409) return '原位置已有同名文件，请先处理同名文件后再恢复。'
     if (error.status === 410) return '文件已被永久删除。'

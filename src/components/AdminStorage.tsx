@@ -221,6 +221,8 @@ export default function AdminStorage() {
         </div>
       </div>
 
+      <p className="admin-storage-note">免费计划每天 10 万次请求，北京时间早上 8 点重置，超出后所有用户都会暂时无法使用。大文件上传每 32 MiB 计一次请求，10 GiB 文件约 320 次请求。</p>
+
       {lowSpace && <p className="admin-storage-alert is-danger" role="alert">存储空间不足，请添加 Google 账号或清理回收站</p>}
       {loadError && <p className="form-error" role="alert">{loadError}</p>}
       {banner && (

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { createDirectory, deleteFile, downloadFile, fetchFileRange, moveItem, renameItem } from './files.ts'
+import { createDirectory, deleteFile, downloadFile, fetchFileRange, FilesRequestError, moveItem, renameItem } from './files.ts'
 
 function mockFetch(response, capture) {
   const original = globalThis.fetch
@@ -126,6 +126,24 @@ test('createDirectory posts the encrypted directory fields', async () => {
     assert.equal(request.input, '/api/files/directories')
     assert.equal(request.init.method, 'POST')
     assert.deepEqual(JSON.parse(request.init.body), { id: 'd1', parent_id: 'parent/id', encName: 'enc', nameKey: 'nk' })
+  } finally {
+    restore()
+  }
+})
+
+test('requestFiles maps a 429 non-JSON response to platform_limited', async () => {
+  const restore = mockFetch(
+    new Response('<html>rate limited</html>', {
+      status: 429,
+      headers: { 'Content-Type': 'text/html' },
+    }),
+    () => {},
+  )
+  try {
+    await assert.rejects(
+      () => createDirectory({ id: 'd1', parentId: null, encName: 'enc', nameKey: 'nk' }),
+      (error) => error instanceof FilesRequestError && error.status === 429 && error.code === 'platform_limited',
+    )
   } finally {
     restore()
   }

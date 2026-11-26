@@ -1,3 +1,5 @@
+import { classifyPlatformResponse } from '../utils/service-limits.ts'
+
 export type DriveItem = {
   id: string
   parent_id: string | null
@@ -50,7 +52,8 @@ async function requestFiles(path: string, init?: RequestInit): Promise<FilesResp
   try {
     payload = await response.json() as FilesResponse
   } catch {
-    throw new FilesRequestError(response.status, 'invalid_response')
+    const code = classifyPlatformResponse(response.status, response.headers.get('Content-Type')) ?? 'invalid_response'
+    throw new FilesRequestError(response.status, code)
   }
   if (!response.ok) throw new FilesRequestError(response.status, payload.error ?? 'request_failed')
   return payload

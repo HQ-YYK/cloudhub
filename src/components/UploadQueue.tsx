@@ -4,6 +4,7 @@ import { cancelUpload, MAX_FILE_SIZE, UploadsRequestError } from '../api/uploads
 import { UploadProgressError } from '../files/chunks'
 import { checkName, nameProblemMessage } from '../files/names'
 import { UploadPausedError, uploadEncryptedFile, type UploadSession } from '../files/upload'
+import { platformErrorMessage } from '../utils/service-limits'
 
 export type UploadQueueHandle = {
   enqueue: (files: File[], parentId: string | null) => void
@@ -30,7 +31,12 @@ type SpeedSample = { time: number; receivedBytes: number }
 const SPEED_WINDOW_MS = 5000
 const MAX_CONCURRENT_UPLOADS = 3
 
+const MAX_FILE_SIZE_GIB = Math.round(MAX_FILE_SIZE / (1024 ** 3))
+const uploadLimitHint = `单个文件最大 ${MAX_FILE_SIZE_GIB} GiB，同时最多上传 ${MAX_CONCURRENT_UPLOADS} 个。`
+
 function uploadErrorMessage(error: unknown): string {
+  const platform = platformErrorMessage(error)
+  if (platform) return platform
   if (error instanceof UploadProgressError) return '上传进度异常，请取消后重新上传'
   if (error instanceof FilesRequestError) {
     if (error.code === 'conflict') return '当前目录已有同名文件'
@@ -318,10 +324,13 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
       return () => window.removeEventListener('beforeunload', warnBeforeUnload)
     }, [hasInProgress, hasPaused])
 
-    if (items.length === 0) return null
+    const limitHint = <p className="upload-queue-limit-hint">{uploadLimitHint}</p>
+    if (items.length === 0) return limitHint
 
     return (
-      <div className="upload-queue" aria-label="上传队列">
+      <>
+        {limitHint}
+        <div className="upload-queue" aria-label="上传队列">
         {hasInProgress && <p className="upload-queue-hint">文件在你的浏览器里加密后上传。请不要关闭或刷新页面，否则未完成的上传需要重新开始。</p>}
         <div className="upload-queue-header">
           <div className="upload-queue-title">
@@ -390,7 +399,8 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
             })}
           </ul>
         )}
-      </div>
+        </div>
+      </>
     )
   },
 )
