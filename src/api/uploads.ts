@@ -22,6 +22,15 @@ export class UploadsRequestError extends FilesRequestError {
   }
 }
 
+export type CreateUploadInput = {
+  id: string
+  parentId: string | null
+  encName: string
+  nameKey: string
+  wrappedKey: string
+  size: number
+}
+
 type UploadResponse = {
   uploadId?: string
   chunkSize?: number
@@ -74,15 +83,17 @@ async function requestUploads(path: string, init: RequestInit = {}, signal?: Abo
   return payload
 }
 
-export async function createUpload(
-  parentId: string | null,
-  name: string,
-  size: number,
-  mimeType: string | null,
-): Promise<{ uploadId: string; chunkSize: number; receivedBytes: number }> {
+export async function createUpload(input: CreateUploadInput): Promise<{ uploadId: string; chunkSize: number; receivedBytes: number }> {
   const payload = await requestUploads('/api/uploads', {
     method: 'POST',
-    body: JSON.stringify({ parentId, name, size, mimeType }),
+    body: JSON.stringify({
+      id: input.id,
+      parentId: input.parentId,
+      encName: input.encName,
+      nameKey: input.nameKey,
+      wrappedKey: input.wrappedKey,
+      size: input.size,
+    }),
   })
   if (typeof payload.uploadId !== 'string' || typeof payload.chunkSize !== 'number' || typeof payload.receivedBytes !== 'number') {
     throw new UploadsRequestError(500, 'invalid_response')
@@ -168,102 +179,4 @@ export async function getUploadProgress(uploadId: string): Promise<{ receivedByt
 
 export async function cancelUpload(uploadId: string): Promise<void> {
   await requestUploads(`/api/uploads/${encodeURIComponent(uploadId)}`, { method: 'DELETE' })
-}
-
-const DEFAULT_RETRY_DELAYS = [1000, 2000, 4000]
-
-function isRetryable(error: unknown): boolean {
-  if (!(error instanceof UploadsRequestError)) return false
-  if (error.status === 0) return true
-  if (error.status === 503) return true
-  return error.status >= 500 && error.status !== 502
-}
-
-function sleep(milliseconds: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal?.aborted) {
-      resolve()
-      return
-    }
-    const timer = setTimeout(resolve, milliseconds)
-    if (!signal) return
-    signal.addEventListener('abort', () => {
-      clearTimeout(timer)
-      resolve()
-    }, { once: true })
-  })
-}
-
-async function abortUpload(uploadId: string | null): Promise<never> {
-  if (uploadId) await cancelUpload(uploadId).catch(() => {})
-  throw new UploadsRequestError(0, 'aborted')
-}
-
-// Release the pending record so the same name can be uploaded again.
-async function failUpload(uploadId: string, error: unknown): Promise<never> {
-  await cancelUpload(uploadId).catch(() => {})
-  throw error
-}
-
-export async function uploadFile(
-  file: File,
-  parentId: string | null,
-  options: {
-    onProgress?: (receivedBytes: number, total: number) => void
-    signal?: AbortSignal
-    retryDelays?: number[]
-  } = {},
-): Promise<DriveItem | null> {
-  const { onProgress, signal, retryDelays = DEFAULT_RETRY_DELAYS } = options
-
-  if (signal?.aborted) return abortUpload(null)
-
-  const created = await createUpload(parentId, file.name, file.size, file.type || null)
-  let receivedBytes = created.receivedBytes
-  let consecutiveFailures = 0
-
-  const report = () => onProgress?.(receivedBytes, file.size)
-
-  while (true) {
-    if (signal?.aborted) return abortUpload(created.uploadId)
-
-    const offset = receivedBytes
-    const chunk = file.slice(offset, offset + created.chunkSize)
-
-    let result: ChunkResult
-    try {
-      result = await uploadChunk(created.uploadId, offset, chunk, signal, (sentBytes) => {
-        onProgress?.(offset + Math.min(sentBytes, chunk.size), file.size)
-      })
-    } catch (error) {
-      if (error instanceof UploadsRequestError && error.code === 'aborted') return abortUpload(created.uploadId)
-      if (error instanceof UploadsRequestError && error.code === 'offset_mismatch') {
-        if (typeof error.receivedBytes !== 'number') return failUpload(created.uploadId, error)
-        receivedBytes = error.receivedBytes
-        consecutiveFailures = 0
-        report()
-        continue
-      }
-      if (!isRetryable(error)) return failUpload(created.uploadId, error)
-
-      consecutiveFailures += 1
-      if (consecutiveFailures >= 3) return failUpload(created.uploadId, error)
-
-      try {
-        const progress = await getUploadProgress(created.uploadId)
-        if (progress.done) return null
-        receivedBytes = progress.receivedBytes
-      } catch {
-        // Keep the last known offset and retry.
-      }
-      report()
-      await sleep(retryDelays[consecutiveFailures - 1] ?? 1000, signal)
-      continue
-    }
-
-    consecutiveFailures = 0
-    receivedBytes = result.receivedBytes
-    report()
-    if (result.done) return result.item ?? null
-  }
 }
