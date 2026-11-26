@@ -1,15 +1,16 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { FilesRequestError } from '../api/files'
-import { MAX_FILE_SIZE, UploadsRequestError } from '../api/uploads'
+import { cancelUpload, MAX_FILE_SIZE, UploadsRequestError } from '../api/uploads'
 import { UploadProgressError } from '../files/chunks'
 import { checkName, nameProblemMessage } from '../files/names'
-import { uploadEncryptedFile } from '../files/upload'
+import { UploadPausedError, uploadEncryptedFile, type UploadSession } from '../files/upload'
 
 export type UploadQueueHandle = {
   enqueue: (files: File[], parentId: string | null) => void
+  isUploading: () => boolean
 }
 
-type UploadStatus = 'waiting' | 'uploading' | 'done' | 'failed' | 'cancelled'
+type UploadStatus = 'waiting' | 'uploading' | 'done' | 'failed' | 'cancelled' | 'paused'
 
 type UploadQueueItem = {
   key: string
@@ -19,6 +20,8 @@ type UploadQueueItem = {
   receivedBytes: number
   totalBytes: number
   error: string
+  session: UploadSession | null
+  retryAttempt: number | null
 }
 
 type SpeedSample = { time: number; receivedBytes: number }
@@ -88,7 +91,7 @@ function computeSpeed(samples: SpeedSample[]): number | null {
 }
 
 function makeItem(key: string, file: File, parentId: string | null, status: UploadStatus, error = ''): UploadQueueItem {
-  return { key, file, parentId, status, receivedBytes: 0, totalBytes: file.size, error }
+  return { key, file, parentId, status, receivedBytes: 0, totalBytes: file.size, error, session: null, retryAttempt: null }
 }
 
 function validateFile(file: File): string {
@@ -101,6 +104,7 @@ function validateFile(file: File): string {
 
 function statusLabel(item: UploadQueueItem, samples: SpeedSample[]): string {
   if (item.status === 'uploading') {
+    if (item.retryAttempt !== null) return `网络中断，正在重试（第 ${item.retryAttempt} 次）…`
     const percent = item.totalBytes > 0 ? Math.min(100, Math.round((item.receivedBytes / item.totalBytes) * 100)) : 0
     const speed = computeSpeed(samples)
     if (speed === null) return `${percent}% · 计算中`
@@ -109,6 +113,7 @@ function statusLabel(item: UploadQueueItem, samples: SpeedSample[]): string {
   }
   if (item.status === 'done') return '已完成'
   if (item.status === 'cancelled') return '已取消'
+  if (item.status === 'paused') return '网络不稳定，上传已暂停'
   if (item.status === 'failed') return item.error
   return '等待中'
 }
@@ -121,8 +126,17 @@ function canRetry(item: UploadQueueItem): boolean {
   return item.status === 'failed' && validateFile(item.file) === ''
 }
 
+function canResume(item: UploadQueueItem): boolean {
+  return item.status === 'paused'
+}
+
+// A paused item keeps its server-side resumable session; dropping it must release that session.
+function releasePausedSession(item: UploadQueueItem | undefined): void {
+  if (item?.status === 'paused' && item.session) void cancelUpload(item.session.uploadId).catch(() => {})
+}
+
 function canRemove(item: UploadQueueItem): boolean {
-  return item.status === 'done' || item.status === 'failed' || item.status === 'cancelled'
+  return item.status === 'done' || item.status === 'failed' || item.status === 'cancelled' || item.status === 'paused'
 }
 
 export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId: string | null) => void; masterKey: Uint8Array<ArrayBuffer> | null }>(
@@ -161,7 +175,7 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
     const runUpload = useCallback(async (item: UploadQueueItem) => {
       const controller = new AbortController()
       controllersRef.current.set(item.key, controller)
-      patchItem(item.key, { status: 'uploading', error: '' })
+      patchItem(item.key, { status: 'uploading', error: '', retryAttempt: null })
       try {
         if (!masterKey) {
           patchItem(item.key, { status: 'failed', error: '文件加密密钥尚未就绪，请刷新页面重试。' })
@@ -170,19 +184,25 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
         await uploadEncryptedFile(item.file, item.parentId, masterKey, {
           onProgress: (receivedBytes, totalBytes) => {
             recordSample(item.key, receivedBytes)
-            patchItem(item.key, { receivedBytes, totalBytes })
+            patchItem(item.key, { receivedBytes, totalBytes, retryAttempt: null })
+          },
+          onRetry: (attempt) => {
+            patchItem(item.key, { retryAttempt: attempt })
           },
           signal: controller.signal,
+          resume: item.session,
         })
-        patchItem(item.key, { status: 'done', receivedBytes: item.file.size, totalBytes: item.file.size })
+        patchItem(item.key, { status: 'done', receivedBytes: item.file.size, totalBytes: item.file.size, session: null })
         dropSamples(item.key)
         onItemDoneRef.current(item.parentId)
       } catch (error) {
         dropSamples(item.key)
         if (error instanceof UploadsRequestError && error.code === 'aborted') {
-          patchItem(item.key, { status: 'cancelled' })
+          patchItem(item.key, { status: 'cancelled', retryAttempt: null })
+        } else if (error instanceof UploadPausedError) {
+          patchItem(item.key, { status: 'paused', session: error.session, retryAttempt: null })
         } else {
-          patchItem(item.key, { status: 'failed', error: uploadErrorMessage(error) })
+          patchItem(item.key, { status: 'failed', error: uploadErrorMessage(error), retryAttempt: null })
         }
       } finally {
         controllersRef.current.delete(item.key)
@@ -228,11 +248,17 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
 
     const retry = useCallback((key: string) => {
       dropSamples(key)
-      patchItem(key, { status: 'waiting', receivedBytes: 0, error: '' })
+      patchItem(key, { status: 'waiting', receivedBytes: 0, error: '', session: null, retryAttempt: null })
+    }, [patchItem, dropSamples])
+
+    const resume = useCallback((key: string) => {
+      dropSamples(key)
+      patchItem(key, { status: 'waiting', retryAttempt: null })
     }, [patchItem, dropSamples])
 
     const remove = useCallback((key: string) => {
       dropSamples(key)
+      releasePausedSession(itemsRef.current.find((item) => item.key === key))
       setItems((previous) => previous.filter((item) => item.key !== key))
     }, [dropSamples])
 
@@ -248,10 +274,15 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
       controllersRef.current.clear()
       activeKeysRef.current.clear()
       samplesRef.current.clear()
+      for (const item of itemsRef.current) releasePausedSession(item)
       setItems([])
     }, [])
 
-    useImperativeHandle(ref, () => ({ enqueue }), [enqueue])
+    const isUploading = useCallback(() => {
+      return itemsRef.current.some((item) => item.status === 'waiting' || item.status === 'uploading')
+    }, [])
+
+    useImperativeHandle(ref, () => ({ enqueue, isUploading }), [enqueue, isUploading])
 
     const hasInProgress = items.some((item) => item.status === 'waiting' || item.status === 'uploading')
     const hasCompleted = items.some((item) => item.status === 'done')
@@ -316,7 +347,9 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
                 ? 'upload-progress-fill is-done'
                 : item.status === 'failed'
                   ? 'upload-progress-fill is-failed'
-                  : 'upload-progress-fill'
+                  : item.status === 'paused'
+                    ? 'upload-progress-fill is-paused'
+                    : 'upload-progress-fill'
               return (
                 <li className="upload-queue-item" key={item.key}>
                   <div className="upload-queue-row">
@@ -324,6 +357,7 @@ export const UploadQueue = forwardRef<UploadQueueHandle, { onItemDone: (parentId
                     <span className="upload-queue-size">{formatBytes(item.receivedBytes)} / {formatBytes(item.totalBytes)}</span>
                     <span className={`upload-queue-status is-${item.status}`}>{statusLabel(item, samples)}</span>
                     <span className="upload-queue-controls">
+                      {canResume(item) && <button type="button" onClick={() => resume(item.key)}>继续上传</button>}
                       {canCancel(item) && <button type="button" onClick={() => cancel(item.key)}>取消</button>}
                       {canRetry(item) && <button type="button" onClick={() => retry(item.key)}>重试</button>}
                       {canRemove(item) && <button type="button" onClick={() => remove(item.key)}>移除</button>}

@@ -6,6 +6,7 @@ export class UploadsRequestError extends FilesRequestError {
   readonly receivedBytes: number | null
   readonly required: number | null
   readonly largestAvailable: number | null
+  readonly retryAfter: number | null
 
   constructor(
     status: number,
@@ -13,12 +14,14 @@ export class UploadsRequestError extends FilesRequestError {
     receivedBytes: number | null = null,
     required: number | null = null,
     largestAvailable: number | null = null,
+    retryAfter: number | null = null,
   ) {
     super(status, code)
     this.name = 'UploadsRequestError'
     this.receivedBytes = receivedBytes
     this.required = required
     this.largestAvailable = largestAvailable
+    this.retryAfter = retryAfter
   }
 }
 
@@ -78,9 +81,20 @@ async function requestUploads(path: string, init: RequestInit = {}, signal?: Abo
     const receivedBytes = typeof payload.receivedBytes === 'number' ? payload.receivedBytes : null
     const required = typeof payload.required === 'number' ? payload.required : null
     const largestAvailable = typeof payload.largestAvailable === 'number' ? payload.largestAvailable : null
-    throw new UploadsRequestError(response.status, payload.error ?? 'request_failed', receivedBytes, required, largestAvailable)
+    const retryAfter = parseRetryAfter(response.headers.get('Retry-After'))
+    throw new UploadsRequestError(response.status, payload.error ?? 'request_failed', receivedBytes, required, largestAvailable, retryAfter)
   }
   return payload
+}
+
+// Retry-After is normally a non-negative integer number of seconds; HTTP-date
+// forms are rare here and fall back to the caller's backoff schedule.
+function parseRetryAfter(value: string | null): number | null {
+  if (value === null) return null
+  const text = value.trim()
+  if (text === '' || !/^\d+$/u.test(text)) return null
+  const seconds = Number(text)
+  return Number.isSafeInteger(seconds) && seconds >= 0 ? seconds : null
 }
 
 export async function createUpload(input: CreateUploadInput): Promise<{ uploadId: string; chunkSize: number; receivedBytes: number }> {
@@ -109,6 +123,8 @@ function parseErrorPayload(text: string): UploadResponse {
   }
 }
 
+const CHUNK_RESPONSE_TIMEOUT_MS = 120000
+
 // fetch cannot report request body progress, so browsers use XHR for chunk bodies.
 function sendChunkWithXhr(
   path: string,
@@ -130,6 +146,16 @@ function sendChunkWithXhr(
     xhr.withCredentials = true
     xhr.setRequestHeader('Accept', 'application/json')
     xhr.upload.onprogress = (event) => onChunkProgress?.(event.loaded)
+    // Keep the request alive while the body is still uploading, then allow 120s
+    // for the server to respond once the body has been fully sent.
+    xhr.timeout = 0
+    xhr.upload.onload = () => {
+      xhr.timeout = CHUNK_RESPONSE_TIMEOUT_MS
+    }
+    xhr.ontimeout = () => {
+      cleanup()
+      reject(new UploadsRequestError(0, 'network_error'))
+    }
     xhr.onload = () => {
       cleanup()
       const payload = parseErrorPayload(xhr.responseText)
@@ -138,7 +164,8 @@ function sendChunkWithXhr(
         return
       }
       const receivedBytes = typeof payload.receivedBytes === 'number' ? payload.receivedBytes : null
-      reject(new UploadsRequestError(xhr.status, payload.error ?? 'request_failed', receivedBytes))
+      const retryAfter = parseRetryAfter(xhr.getResponseHeader('Retry-After'))
+      reject(new UploadsRequestError(xhr.status, payload.error ?? 'request_failed', receivedBytes, null, null, retryAfter))
     }
     xhr.onerror = () => {
       cleanup()
