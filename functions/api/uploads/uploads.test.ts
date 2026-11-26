@@ -22,6 +22,22 @@ const owner = { id: '11111111-1111-4111-8111-111111111111', username: 'alice', r
 const otherOwner = { id: '22222222-2222-4222-8222-222222222222', username: 'bob', role: 'user' as const, must_change_password: 0 }
 const fileId = '33333333-3333-4333-8333-333333333333'
 const key = Buffer.from('k'.repeat(32), 'ascii').toString('base64url')
+const encName = 'A'.repeat(44)
+const nameKey = 'A'.repeat(43)
+const wrappedKey = 'A'.repeat(80)
+const cipherSize = 28
+
+function createBody(overrides: Record<string, unknown> = {}) {
+  return {
+    id: fileId,
+    parentId: null,
+    encName,
+    nameKey,
+    wrappedKey,
+    size: cipherSize,
+    ...overrides,
+  }
+}
 
 function authRepository(user = owner): AuthRepository {
   return {
@@ -67,6 +83,8 @@ function file(overrides: Partial<FileRecord> = {}): FileRecord {
     updated_at: '2030-01-01T00:00:00.000Z',
     deleted_at: null,
     storage_status: 'pending',
+    enc: 1,
+    wrapped_key: wrappedKey,
     ...overrides,
   }
 }
@@ -130,6 +148,8 @@ function makeFileRepository(initialFiles: FileRecord[] = [], initialSessions: Up
         updated_at: input.updatedAt,
         deleted_at: null,
         storage_status: 'pending',
+        enc: input.enc,
+        wrapped_key: input.wrappedKey,
       }
       files.push(record)
       return record
@@ -325,7 +345,7 @@ test('create upload stores an encrypted session uri and hides it from responses'
   const { overrides, files, sessions } = buildOverrides({ userFolder: 'user-folder', driveClient })
   const handler = createUploadHandler(overrides)
   const response = await handler({
-    request: postBody({ parentId: null, name: 'report.pdf', size: 1048576, mimeType: 'application/pdf' }),
+    request: postBody(createBody()),
     env: env(),
     params: {},
   } as never)
@@ -344,45 +364,55 @@ test('create upload stores an encrypted session uri and hides it from responses'
   assert.equal(decrypted, 'https://session.example/upload')
 
   assert.equal(files[0].storage_status, 'pending')
+  assert.equal(files[0].enc, 1)
+  assert.equal(files[0].wrapped_key, wrappedKey)
   assert.equal(resumeCalls.length, 1)
-  assert.deepEqual(JSON.parse(String(resumeCalls[0].init?.body)), { name: 'report.pdf', parents: ['folder-1'] })
+  assert.deepEqual(JSON.parse(String(resumeCalls[0].init?.body)), { name: fileId, parents: ['folder-1'] })
   const headers = resumeCalls[0].init?.headers as Record<string, string>
-  assert.equal(headers['X-Upload-Content-Type'], 'application/pdf')
-  assert.equal(headers['X-Upload-Content-Length'], '1048576')
+  assert.equal(headers['X-Upload-Content-Type'], 'application/octet-stream')
+  assert.equal(headers['X-Upload-Content-Length'], String(cipherSize))
 })
 
-test('create upload rejects empty, oversized, and non-integer sizes', async () => {
+test('create upload rejects invalid cipher sizes', async () => {
   const { overrides } = buildOverrides()
   const handler = createUploadHandler(overrides)
-  for (const [size, error] of [[0, 'empty_file'], [10737418241, 'invalid_size'], [1.5, 'invalid_size'], ['10', 'invalid_size']]) {
+  for (const size of [0, 27, 1.5, '28', 33554460]) {
     const response = await handler({
-      request: postBody({ parentId: null, name: 'a.bin', size }),
+      request: postBody(createBody({ size })),
       env: env(),
       params: {},
     } as never)
     assert.equal(response.status, 400)
-    assert.deepEqual(await response.json(), { error })
+    assert.deepEqual(await response.json(), { error: 'invalid_size' })
   }
 })
 
-test('create upload rejects invalid names', async () => {
+test('create upload rejects plaintext names and invalid e2ee fields', async () => {
   const { overrides } = buildOverrides()
   const handler = createUploadHandler(overrides)
-  const response = await handler({
-    request: postBody({ parentId: null, name: 'a/b', size: 1 }),
-    env: env(),
-    params: {},
-  } as never)
-  assert.equal(response.status, 400)
-  assert.deepEqual(await response.json(), { error: 'invalid_name' })
+  for (const body of [
+    createBody({ name: 'report.pdf' }),
+    createBody({ encName: 'not base64!' }),
+    createBody({ nameKey: 'short' }),
+    createBody({ wrappedKey: 'short' }),
+    createBody({ id: 'not-a-uuid' }),
+  ]) {
+    const response = await handler({
+      request: postBody(body),
+      env: env(),
+      params: {},
+    } as never)
+    assert.equal(response.status, 400)
+    assert.deepEqual(await response.json(), { error: 'invalid_request' })
+  }
 })
 
 test('create upload rejects a parent directory owned by another user', async () => {
-  const foreign = file({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', owner_id: otherOwner.id, kind: 'directory', storage_status: 'ready', name: 'Other' })
+  const foreign = file({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', owner_id: otherOwner.id, kind: 'directory', storage_status: 'ready', name: 'Other', wrapped_key: null })
   const { overrides } = buildOverrides({ files: [foreign] })
   const handler = createUploadHandler(overrides)
   const response = await handler({
-    request: postBody({ parentId: foreign.id, name: 'a.bin', size: 1 }),
+    request: postBody(createBody({ parentId: foreign.id })),
     env: env(),
     params: {},
   } as never)
@@ -391,11 +421,11 @@ test('create upload rejects a parent directory owned by another user', async () 
 })
 
 test('create upload returns conflict for a duplicate active name', async () => {
-  const existing = file({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'a.txt', name_key: 'a.txt' })
+  const existing = file({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: encName, name_key: nameKey })
   const { overrides } = buildOverrides({ files: [existing] })
   const handler = createUploadHandler(overrides)
   const response = await handler({
-    request: postBody({ parentId: null, name: 'a.txt', size: 1 }),
+    request: postBody(createBody()),
     env: env(),
     params: {},
   } as never)
@@ -408,7 +438,7 @@ test('create upload marks the file failed when the resumable session cannot star
   const { overrides, files } = buildOverrides({ userFolder: 'user-folder', driveClient })
   const handler = createUploadHandler(overrides)
   const response = await handler({
-    request: postBody({ parentId: null, name: 'a.bin', size: 1 }),
+    request: postBody(createBody()),
     env: env(),
     params: {},
   } as never)
@@ -421,7 +451,7 @@ test('create upload reports storage_not_connected and storage_not_configured', a
   const notConnected = buildOverrides({ userFolder: null, storageAccount: null })
   let handler = createUploadHandler(notConnected.overrides)
   let response = await handler({
-    request: postBody({ parentId: null, name: 'a.bin', size: 1 }),
+    request: postBody(createBody()),
     env: env(),
     params: {},
   } as never)
@@ -435,7 +465,7 @@ test('create upload reports storage_not_connected and storage_not_configured', a
   const notConfigured = buildOverrides({ userFolder: 'user-folder', driveClient })
   handler = createUploadHandler(notConfigured.overrides)
   response = await handler({
-    request: postBody({ parentId: null, name: 'b.bin', size: 1 }),
+    request: postBody(createBody()),
     env: env(),
     params: {},
   } as never)

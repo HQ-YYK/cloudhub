@@ -31,6 +31,9 @@ export function createUploadHandler(overrides: Partial<UploadDependencies> = {})
       } catch {
         return jsonResponse({ error: 'invalid_request' }, 400)
       }
+      if (Object.prototype.hasOwnProperty.call(body, 'name')) {
+        return jsonResponse({ error: 'invalid_request' }, 400)
+      }
       const created = await service.create(context.request, body)
       return jsonResponse(created, 201)
     } catch (error) {

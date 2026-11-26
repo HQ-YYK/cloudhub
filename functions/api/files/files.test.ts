@@ -8,6 +8,14 @@ function context(request: Request, DB?: D1Database) {
   return { request, env: { DB } } as never
 }
 
+const dirId = '33333333-3333-4333-8333-333333333333'
+const encName = 'A'.repeat(44)
+const nameKey = 'A'.repeat(43)
+
+function dirBody(overrides: Record<string, unknown> = {}) {
+  return { parent_id: null, id: dirId, encName, nameKey, ...overrides }
+}
+
 function trackingDatabase() {
   let prepareCount = 0
   const db = {
@@ -46,7 +54,7 @@ test('directory creation accepts same-origin requests and rejects missing or for
         Origin: 'https://cloudhub.test',
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ parent_id: null, name: 'Documents' }),
+      body: JSON.stringify(dirBody()),
     }),
     sameOriginDb,
   ))
@@ -64,7 +72,7 @@ test('directory creation accepts same-origin requests and rejects missing or for
       new Request('https://cloudhub.test/api/files/directories', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...headers },
-        body: JSON.stringify({ parent_id: null, name: 'Blocked' }),
+        body: JSON.stringify(dirBody()),
       }),
       db,
     ))
@@ -97,7 +105,7 @@ test('directory creation rejects malformed JSON and non-object JSON bodies with 
         Origin: 'https://cloudhub.test',
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ parent_id: 42, name: 'Documents' }),
+      body: JSON.stringify(dirBody({ parent_id: 42 })),
     }),
     trackingDatabase(),
   ))

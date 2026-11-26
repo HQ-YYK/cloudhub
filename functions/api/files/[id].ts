@@ -58,6 +58,7 @@ function moveErrorResponse(error: MoveServiceError) {
   if (error.code === 'invalid_name') return jsonResponse({ error: 'invalid_name' }, 400)
   if (error.code === 'not_found') return jsonResponse({ error: 'not_found' }, 404)
   if (error.code === 'conflict') return jsonResponse({ error: 'conflict' }, 409)
+  if (error.code === 'legacy_file') return jsonResponse({ error: 'legacy_file' }, 409)
   if (error.code === 'invalid_move') return jsonResponse({ error: 'invalid_move' }, 409)
   if (error.code === 'not_ready') return jsonResponse({ error: 'not_ready' }, 409)
   if (error.code === 'storage_not_connected') return jsonResponse({ error: 'storage_not_connected' }, 503)
@@ -177,10 +178,14 @@ export function createPatchHandler(
       return jsonResponse({ error: 'invalid_request' }, 400)
     }
 
-    const hasName = Object.prototype.hasOwnProperty.call(body, 'name')
+    if (Object.prototype.hasOwnProperty.call(body, 'name')) {
+      return jsonResponse({ error: 'invalid_request' }, 400)
+    }
+    const hasEncName = Object.prototype.hasOwnProperty.call(body, 'encName')
+    const hasNameKey = Object.prototype.hasOwnProperty.call(body, 'nameKey')
     const hasParentId = Object.prototype.hasOwnProperty.call(body, 'parentId')
-    if (!hasName && !hasParentId) return jsonResponse({ error: 'invalid_request' }, 400)
-    if (hasName && typeof body.name !== 'string') return jsonResponse({ error: 'invalid_request' }, 400)
+    if (!hasEncName && !hasNameKey && !hasParentId) return jsonResponse({ error: 'invalid_request' }, 400)
+    if (hasEncName !== hasNameKey) return jsonResponse({ error: 'invalid_request' }, 400)
     if (hasParentId && body.parentId !== null && typeof body.parentId !== 'string') {
       return jsonResponse({ error: 'invalid_request' }, 400)
     }
