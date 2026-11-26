@@ -131,7 +131,7 @@ test('createDirectory posts the encrypted directory fields', async () => {
   }
 })
 
-test('fetchFileRange requests a byte range and returns the bytes', async () => {
+test('fetchFileRange requests a byte range and returns a stream', async () => {
   let request
   const restore = mockFetch(
     new Response('abcdef', { headers: { 'Content-Type': 'application/octet-stream' } }),
@@ -140,10 +140,12 @@ test('fetchFileRange requests a byte range and returns the bytes', async () => {
     },
   )
   try {
-    const bytes = await fetchFileRange('file/id', 100, 106)
+    const stream = await fetchFileRange('file/id', 100, 106)
     assert.equal(request.input, '/api/files/file%2Fid/download')
     assert.equal(request.init.headers.Range, 'bytes=100-105')
-    assert.deepEqual([...bytes], [...new TextEncoder().encode('abcdef')])
+    const reader = stream.getReader()
+    const { value } = await reader.read()
+    assert.deepEqual([...value], [...new TextEncoder().encode('abcdef')])
   } finally {
     restore()
   }

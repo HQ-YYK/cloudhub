@@ -169,6 +169,7 @@
 .upload-queue-status { font-size: 11px; font-weight: 650; white-space: nowrap; }
 .upload-queue-status.is-done { color: #3c8a65; }
 .upload-queue-status.is-failed { color: #c64f5c; }
+.upload-queue-status.is-paused { color: #9a6a00; }
 .upload-queue-status.is-cancelled, .upload-queue-status.is-waiting { color: #9aa5b7; }
 .upload-queue-status.is-uploading { color: var(--blue); }
 .upload-queue-controls { display: flex; gap: 10px; }
@@ -177,6 +178,7 @@
 .upload-progress-fill { display: block; height: 100%; background: var(--blue); border-radius: 3px; transition: width .2s; }
 .upload-progress-fill.is-done { background: #3c8a65; }
 .upload-progress-fill.is-failed { background: #c64f5c; }
+.upload-progress-fill.is-paused { background: #d99a2b; }
 
 .forced-password-page { min-height: 100vh; display: grid; place-items: center; align-content: center; padding: 24px; background: #f5f7fb; }
 .forced-password-page > .forced-password-page { min-height: auto; padding: 0; }
@@ -371,6 +373,7 @@
 .drive-download-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 650; }
 .drive-download-size { color: #8995a9; font-size: 11px; white-space: nowrap; }
 .drive-download-progress button { padding: 0; color: var(--blue); background: transparent; border: 0; font-size: 11px; font-weight: 700; }
+.drive-download-note { grid-column: 1 / -1; margin: 0; color: #9a6a00; font-size: 11px; line-height: 1.5; }
 .upload-queue-hint { margin: 0 0 12px; color: #8995a9; font-size: 11px; line-height: 1.6; }
 
 .keep-unlocked-row { display: grid; gap: 3px; }

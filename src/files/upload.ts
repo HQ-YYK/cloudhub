@@ -13,13 +13,42 @@ import { plainChunkRange, plainOffsetFromCipherReceived } from './chunks.ts'
 import { nameKeyForName } from './session.ts'
 import { normalizeName } from './names.ts'
 
-const DEFAULT_RETRY_DELAYS = [1000, 2000, 4000]
+export const DEFAULT_RETRY_DELAYS = [2000, 5000, 10000, 20000, 30000, 30000]
+const MAX_RETRY_AFTER_SECONDS = 60
 
-function isRetryable(error: unknown): boolean {
+export type UploadSession = {
+  id: string
+  fk: Uint8Array<ArrayBuffer>
+  uploadId: string
+  parentId: string | null
+  plainSize: number
+  cipherSize: number
+  encName: string
+  nameKey: string
+  wrappedKey: string
+}
+
+export class UploadPausedError extends Error {
+  readonly session: UploadSession
+
+  constructor(session: UploadSession) {
+    super('upload_paused')
+    this.name = 'UploadPausedError'
+    this.session = session
+  }
+}
+
+export function isRetryable(error: unknown): boolean {
   if (!(error instanceof UploadsRequestError)) return false
-  if (error.status === 0) return true
-  if (error.status === 503) return true
-  return error.status >= 500 && error.status !== 502
+  if (error.status === 0 || error.status === 408 || error.status === 429) return true
+  return error.status >= 500
+}
+
+export function retryDelayFor(error: unknown, retryDelays: number[], attempt: number): number {
+  if (error instanceof UploadsRequestError && error.retryAfter !== null && error.retryAfter >= 0) {
+    return Math.min(error.retryAfter, MAX_RETRY_AFTER_SECONDS) * 1000
+  }
+  return retryDelays[attempt - 1] ?? 1000
 }
 
 function sleep(milliseconds: number, signal?: AbortSignal): Promise<void> {
@@ -42,80 +71,93 @@ async function abortUpload(uploadId: string | null): Promise<never> {
   throw new UploadsRequestError(0, 'aborted')
 }
 
-async function failUpload(uploadId: string, error: unknown): Promise<never> {
-  await cancelUpload(uploadId).catch(() => {})
-  throw error
-}
-
 export async function uploadEncryptedFile(
   file: File,
   parentId: string | null,
   mk: Uint8Array<ArrayBuffer>,
   options: {
     onProgress?: (receivedPlainBytes: number, totalPlainBytes: number) => void
+    onRetry?: (attempt: number) => void
     signal?: AbortSignal
     retryDelays?: number[]
+    resume?: UploadSession | null
   } = {},
 ): Promise<DriveItem | null> {
-  const { onProgress, signal, retryDelays = DEFAULT_RETRY_DELAYS } = options
+  const { onProgress, onRetry, signal, retryDelays = DEFAULT_RETRY_DELAYS, resume = null } = options
   if (signal?.aborted) return abortUpload(null)
 
-  const name = normalizeName(file.name)
-  const id = crypto.randomUUID()
-  const fk = generateFileKey()
-  const plainSize = file.size
-  const encName = await encryptFileMeta(fk, id, { name, mimeType: file.type || null })
-  const nameKey = await nameKeyForName(mk, name)
-  const wrappedKey = await wrapFileKey(fk, mk, id)
-  const size = cipherSize(plainSize)
+  let session: UploadSession
+  if (resume) {
+    session = resume
+  } else {
+    const name = normalizeName(file.name)
+    const id = crypto.randomUUID()
+    const fk = generateFileKey()
+    const plainSize = file.size
+    const encName = await encryptFileMeta(fk, id, { name, mimeType: file.type || null })
+    const nameKey = await nameKeyForName(mk, name)
+    const wrappedKey = await wrapFileKey(fk, mk, id)
+    const size = cipherSize(plainSize)
+    const created = await createUpload({ id, parentId, encName, nameKey, wrappedKey, size })
+    session = {
+      id,
+      fk,
+      uploadId: created.uploadId,
+      parentId,
+      plainSize,
+      cipherSize: size,
+      encName,
+      nameKey,
+      wrappedKey,
+    }
+  }
 
-  const created = await createUpload({ id, parentId, encName, nameKey, wrappedKey, size })
   let plainOffset = 0
   let consecutiveFailures = 0
 
-  const report = () => onProgress?.(plainOffset, plainSize)
+  const report = () => onProgress?.(plainOffset, session.plainSize)
 
   while (true) {
-    if (signal?.aborted) return abortUpload(created.uploadId)
+    if (signal?.aborted) return abortUpload(session.uploadId)
 
     const chunkIndex = Math.floor(plainOffset / PLAIN_CHUNK_SIZE)
-    const { start, end, isLast } = plainChunkRange(plainSize, chunkIndex)
+    const { start, end, isLast } = plainChunkRange(session.plainSize, chunkIndex)
     const plainBytes = new Uint8Array(await file.slice(start, end).arrayBuffer())
-    const cipherBytes = await encryptChunk(fk, id, chunkIndex, isLast, plainBytes)
+    const cipherBytes = await encryptChunk(session.fk, session.id, chunkIndex, isLast, plainBytes)
     const cipherOffset = chunkIndex * CIPHER_CHUNK_SIZE
 
     let result
     try {
-      result = await uploadChunk(created.uploadId, cipherOffset, new Blob([cipherBytes]), signal, (sentBytes) => {
+      result = await uploadChunk(session.uploadId, cipherOffset, new Blob([cipherBytes]), signal, (sentBytes) => {
         const withinChunk = Math.max(0, Math.min(sentBytes, cipherBytes.length) - 28)
-        onProgress?.(plainOffset + Math.min(withinChunk, end - start), plainSize)
+        onProgress?.(plainOffset + Math.min(withinChunk, end - start), session.plainSize)
       })
     } catch (error) {
-      if (error instanceof UploadsRequestError && error.code === 'aborted') return abortUpload(created.uploadId)
+      if (error instanceof UploadsRequestError && error.code === 'aborted') return abortUpload(session.uploadId)
       if (error instanceof UploadsRequestError && error.code === 'offset_mismatch') {
-        if (typeof error.receivedBytes !== 'number') return failUpload(created.uploadId, error)
-        plainOffset = plainOffsetFromCipherReceived(error.receivedBytes, plainSize)
+        if (typeof error.receivedBytes !== 'number') throw error
+        plainOffset = plainOffsetFromCipherReceived(error.receivedBytes, session.plainSize)
         consecutiveFailures = 0
         report()
         continue
       }
-      if (!isRetryable(error)) return failUpload(created.uploadId, error)
+      if (!isRetryable(error)) throw error
 
       consecutiveFailures += 1
-      if (consecutiveFailures >= 3) return failUpload(created.uploadId, error)
+      if (consecutiveFailures > retryDelays.length) throw new UploadPausedError(session)
 
       let progress
       try {
-        progress = await getUploadProgress(created.uploadId)
+        progress = await getUploadProgress(session.uploadId)
       } catch {
         progress = null
       }
       if (progress) {
         if (progress.done) return null
-        plainOffset = plainOffsetFromCipherReceived(progress.receivedBytes, plainSize)
+        plainOffset = plainOffsetFromCipherReceived(progress.receivedBytes, session.plainSize)
       }
-      report()
-      await sleep(retryDelays[consecutiveFailures - 1] ?? 1000, signal)
+      onRetry?.(consecutiveFailures)
+      await sleep(retryDelayFor(error, retryDelays, consecutiveFailures), signal)
       continue
     }
 

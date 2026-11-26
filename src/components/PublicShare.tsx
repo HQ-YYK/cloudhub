@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchPublicShareRange, getPublicShare, SharesRequestError, type PublicShareMetadata } from '../api/shares'
 import { decryptFileMeta, plainSizeFromCipher } from '../crypto'
-import { DownloadError, downloadEncryptedFile } from '../files/download'
+import { DownloadError, downloadEncryptedFile, formatRemaining, formatSpeed } from '../files/download'
 import { parseShareKeyHash } from '../files/share'
 
 function formatFileSize(size: number | null) {
@@ -52,7 +52,7 @@ export default function PublicShare({ token }: { token: string }) {
   const [metadata, setMetadata] = useState<PublicShareMetadata | null>(null)
   const [displayName, setDisplayName] = useState<string | null>(null)
   const [plainSize, setPlainSize] = useState<number | null>(null)
-  const [download, setDownload] = useState<{ receivedBytes: number; totalBytes: number } | null>(null)
+  const [download, setDownload] = useState<{ receivedBytes: number; totalBytes: number; speedBytesPerSecond: number | null; etaSeconds: number | null } | null>(null)
   const [downloadError, setDownloadError] = useState('')
   const downloadControllerRef = useRef<AbortController | null>(null)
 
@@ -120,7 +120,7 @@ export default function PublicShare({ token }: { token: string }) {
     setDownloadError('')
     const controller = new AbortController()
     downloadControllerRef.current = controller
-    setDownload({ receivedBytes: 0, totalBytes: plainSize ?? 0 })
+    setDownload({ receivedBytes: 0, totalBytes: plainSize ?? 0, speedBytesPerSecond: null, etaSeconds: null })
     try {
       await downloadEncryptedFile({
         fk,
@@ -128,13 +128,14 @@ export default function PublicShare({ token }: { token: string }) {
         cipherSize: metadata.sizeBytes,
         fileName: displayName ?? 'download',
         fetchRange: (start, end, signal) => fetchPublicShareRange(token, start, end, signal),
-        onProgress: (receivedBytes, totalBytes) => setDownload({ receivedBytes, totalBytes }),
+        onProgress: (progress) => setDownload({ receivedBytes: progress.receivedBytes, totalBytes: progress.totalBytes, speedBytesPerSecond: progress.speedBytesPerSecond, etaSeconds: progress.etaSeconds }),
         signal: controller.signal,
       })
     } catch (error) {
       if (error instanceof DownloadError) {
         if (error.code === 'decrypt_failed') setDownloadError('文件已损坏或被篡改，无法解密')
         else if (error.code === 'too_large') setDownloadError('文件太大，当前浏览器无法下载，请改用 Chrome 或 Edge')
+        else if (error.code === 'incomplete') setDownloadError('下载不完整，请重试')
       } else {
         setDownloadError('下载失败，请稍后重试')
       }
@@ -184,7 +185,11 @@ export default function PublicShare({ token }: { token: string }) {
           {downloadError && <p className="public-share-error" role="alert">{downloadError}</p>}
           {download && (
             <div className="public-share-download-progress" role="status">
-              <span>{formatFileSize(download.receivedBytes)} / {formatFileSize(download.totalBytes)}</span>
+              <span>
+                {formatFileSize(download.receivedBytes)} / {formatFileSize(download.totalBytes)}
+                {download.speedBytesPerSecond !== null && ` · ${formatSpeed(download.speedBytesPerSecond)}`}
+                {download.etaSeconds !== null && ` · 剩余约 ${formatRemaining(download.etaSeconds)}`}
+              </span>
               <button type="button" onClick={() => downloadControllerRef.current?.abort()}>取消</button>
               <div className="upload-progress" role="progressbar" aria-valuemin={0} aria-valuemax={download.totalBytes} aria-valuenow={download.receivedBytes} aria-label="下载进度">
                 <span className="upload-progress-fill" style={{ width: `${downloadPercent}%` }} />

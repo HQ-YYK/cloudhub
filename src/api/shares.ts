@@ -119,7 +119,7 @@ export async function fetchPublicShareRange(
   start: number,
   end: number,
   signal?: AbortSignal,
-): Promise<Uint8Array<ArrayBuffer>> {
+): Promise<ReadableStream<Uint8Array<ArrayBuffer>>> {
   let response: Response
   try {
     response = await fetch(`/api/public/shares/${encodeURIComponent(token)}/download`, {
@@ -139,5 +139,6 @@ export async function fetchPublicShareRange(
     }
     throw new SharesRequestError(response.status, payload.error ?? 'request_failed')
   }
-  return new Uint8Array(await response.arrayBuffer())
+  if (!response.body) throw new SharesRequestError(response.status, 'invalid_response')
+  return response.body
 }
