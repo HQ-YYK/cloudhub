@@ -22,6 +22,7 @@ export interface SessionUser {
   must_change_password: number
   kdf_salt?: string | null
   wrapped_master_key?: string | null
+  last_seen_at?: string | null
 }
 
 export interface UserSummary {

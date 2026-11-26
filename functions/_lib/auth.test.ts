@@ -149,6 +149,46 @@ test('authenticated user lookup rejects an expired or disabled session', async (
   assert.equal(await getAuthenticatedUser(repository().authRepository, request), null)
 })
 
+test('session touch is skipped when last_seen_at is within the interval', async () => {
+  const now = new Date('2026-01-01T00:05:00.000Z')
+  const request = new Request('https://cloudhub.test/api/auth/me', {
+    headers: { Cookie: sessionCookie('test-token') },
+  })
+  const recent = repository({
+    session_id: 'session-1',
+    id: 'user-1',
+    username: 'alice',
+    role: 'user',
+    must_change_password: 0,
+    last_seen_at: '2026-01-01T00:04:59.000Z',
+  })
+
+  const user = await getAuthenticatedUser(recent.authRepository, request, now)
+
+  assert.equal(user?.id, 'user-1')
+  assert.equal(recent.touchCount, 0)
+})
+
+test('session touch runs when last_seen_at is older than the interval', async () => {
+  const now = new Date('2026-01-01T00:05:00.000Z')
+  const request = new Request('https://cloudhub.test/api/auth/me', {
+    headers: { Cookie: sessionCookie('test-token') },
+  })
+  const stale = repository({
+    session_id: 'session-1',
+    id: 'user-1',
+    username: 'alice',
+    role: 'user',
+    must_change_password: 0,
+    last_seen_at: '2025-12-31T23:59:59.000Z',
+  })
+
+  const user = await getAuthenticatedUser(stale.authRepository, request, now)
+
+  assert.equal(user?.id, 'user-1')
+  assert.equal(stale.touchCount, 1)
+})
+
 test('rate limiting blocks an attempt during its block window', () => {
   const now = new Date('2026-01-01T00:00:00.000Z')
   assert.equal(isLoginBlocked({
@@ -274,6 +314,7 @@ test('me returns only public user fields', async () => {
     env: { DB: db },
   } as never)
   assert.equal(response.status, 200)
+  assert.match(response.headers.get('Server-Timing') ?? '', /^auth;dur=\d+, db;dur=\d+, total;dur=\d+$/u)
   const body = await response.json() as { user: Record<string, unknown> }
   assert.deepEqual(body.user, {
     id: 'user-1',

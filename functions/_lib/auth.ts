@@ -3,6 +3,7 @@ import type { AuthRepository, LoginAttempt, NewSession } from './auth-repository
 export const PASSWORD_ITERATIONS = 100000
 export const MAX_PBKDF2_ITERATIONS = 100000
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000
+export const SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000
 export const MAX_LOGIN_FAILURES = 5
 export const LOGIN_WINDOW_MS = 15 * 60 * 1000
 export const LOGIN_BLOCK_MS = 15 * 60 * 1000
@@ -117,7 +118,10 @@ export async function getAuthenticatedUser(repository: AuthRepository, request: 
 
   if (!row) return null
 
-  await repository.touchSession(row.session_id, now.toISOString())
+  const lastSeenAt = row.last_seen_at == null ? 0 : new Date(row.last_seen_at).getTime()
+  if (!Number.isFinite(lastSeenAt) || lastSeenAt < now.getTime() - SESSION_TOUCH_INTERVAL_MS) {
+    await repository.touchSession(row.session_id, now.toISOString())
+  }
 
   return {
     id: row.id,

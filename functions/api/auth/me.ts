@@ -5,6 +5,7 @@ import type { AuthEnv } from '../../../functions/_lib/cloudflare-env.ts'
 import { createD1AuthRepository } from '../../../functions/_lib/d1-auth-repository.ts'
 import { createD1TotpRepository } from '../../../functions/_lib/d1-totp-repository.ts'
 import { jsonResponse, methodNotAllowed } from '../../../functions/_lib/http.ts'
+import { createServerTiming } from '../../../functions/_lib/server-timing.ts'
 import type { TotpRepository } from '../../../functions/_lib/totp-repository.ts'
 
 interface MeDependencies {
@@ -32,11 +33,14 @@ export function createMeHandler(
     if (!context.env.DB) return jsonResponse({ error: 'service_unavailable' }, 503)
 
     try {
+      const timer = createServerTiming()
       const authRepository = dependencies.createAuthRepository(context.env)
       const user = await getAuthenticatedUser(authRepository, context.request)
+      timer.mark('auth')
       if (!user) return jsonResponse({ error: 'unauthorized' }, 401)
 
       const totpUser = await dependencies.createTotpRepository(context.env).findTotpUser(user.id)
+      timer.mark('db')
       return jsonResponse({ user: {
         id: user.id,
         username: user.username,
@@ -44,7 +48,7 @@ export function createMeHandler(
         mustChangePassword: user.mustChangePassword,
         keysReady: user.keysReady,
         totpEnabled: Boolean(totpUser?.totp_secret_ciphertext),
-      } })
+      } }, 200, { 'Server-Timing': timer.header() })
     } catch (error) {
       console.error('Session lookup failed', error)
       return jsonResponse({ error: 'service_unavailable' }, 503)
