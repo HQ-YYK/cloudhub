@@ -3,97 +3,33 @@ import {
   createDirectory,
   deleteFile,
   downloadFile,
+  fetchFileRange,
   listFiles,
   renameItem,
   type DriveItem,
-  FilesRequestError,
 } from '../api/files'
+import { CryptoError, plainSizeFromCipher } from '../crypto'
+import { useAuth } from '../auth/useAuth'
+import { DownloadError, downloadEncryptedFile } from '../files/download'
+import { checkName, nameProblemMessage } from '../files/names'
+import { buildCreateDirectoryPayload, buildRenamePayload } from '../files/rename'
+import { fileKeyFor, resolveDriveItems, type DisplayItem } from '../files/session'
 import { EmptyIcon, FileIcon, FolderIcon, MoreIcon, UploadIcon } from './DriveIcons'
 import MoveDialog from './MoveDialog'
 import RenameInput from './RenameInput'
 import ShareDialog from './ShareDialog'
 import { UploadQueue, type UploadQueueHandle } from './UploadQueue'
+import { formatFileSize, formatUpdatedAt, plainSizeLabel, renameErrorMessage, requestErrorMessage } from './drive-format'
 
 type DirectoryLevel = {
   id: string | null
   name: string
 }
 
-function requestErrorMessage(error: unknown, action: 'list' | 'create' | 'download' | 'delete') {
-  if (error instanceof FilesRequestError) {
-    if (error.code === 'password_change_required') return '请先修改密码'
-    if (error.code === 'folder_too_large') return '文件夹内容超过 5000 项，请先分批删除里面的内容'
-    if (error.code === 'folder_busy') return '文件夹里有正在上传的文件，请等上传完成后再删除'
-    if (error.status === 401) return '登录状态已失效，请重新登录后继续。'
-    if (error.status === 403) return '请求来源未通过安全校验，请刷新页面后重试。'
-    if (error.status === 409) return '当前目录中已经存在同名文件夹。'
-    if (error.status === 404) {
-      return action === 'delete' ? '文件不存在或已被删除。' : '目录或文件不存在或已不可访问。'
-    }
-    if (error.status === 400) {
-      return action === 'create' ? '文件夹名称无效，请检查后重试。' : '请求无效，请检查后重试。'
-    }
-    if (error.status === 0) return '网络连接失败，请检查网络后重试。'
-  }
-  const messages = {
-    list: '目录加载失败，请稍后重试。',
-    create: '文件夹创建失败，请稍后重试。',
-    download: '文件下载失败，请稍后重试。',
-    delete: '删除失败，请稍后重试。',
-  } satisfies Record<typeof action, string>
-  return messages[action]
-}
-
-function renameErrorMessage(error: unknown) {
-  if (error instanceof FilesRequestError) {
-    if (error.code === 'conflict') return '目标位置已有同名文件或文件夹'
-    if (error.code === 'invalid_move') return '不能移动到它自己的子文件夹里'
-    if (error.code === 'not_ready') return '文件还没上传完成'
-    if (error.code === 'invalid_name') return '名称无效，请检查后重试。'
-    if (error.code === 'password_change_required') return '请先修改密码'
-    if (error.status === 401) return '登录状态已失效，请重新登录后继续。'
-    if (error.status === 403) return '请求来源未通过安全校验，请刷新页面后重试。'
-    if (error.status === 404) return '目录或文件不存在或已不可访问。'
-    if (error.status === 0) return '网络连接失败，请检查网络后重试。'
-  }
-  return '重命名失败，请稍后重试。'
-}
-
-function formatFileSize(size: number | null) {
-  if (size === null) return '大小未知'
-  if (size < 1024) return `${size} B`
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function formatUpdatedAt(value: string) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '更新时间未知'
-  return new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric',
-    month: 'numeric',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date)
-}
-
-function displayItemName(name: string, kind: 'file' | 'directory') {
-  const normalized = name.normalize('NFC').trim()
-  const hasReplacementText = normalized.includes('�')
-  const hasControlCharacter = [...normalized].some((character) => {
-    const code = character.codePointAt(0) ?? 0
-    return code <= 0x1f || code === 0x7f
-  })
-  if (!normalized || hasReplacementText || hasControlCharacter) {
-    return kind === 'directory' ? '未命名文件夹' : '未命名文件'
-  }
-  return normalized
-}
-
 export default function CloudDrive() {
+  const { masterKey } = useAuth()
   const [levels, setLevels] = useState<DirectoryLevel[]>([{ id: null, name: '我的云盘' }])
-  const [items, setItems] = useState<DriveItem[]>([])
+  const [entries, setEntries] = useState<DisplayItem[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [loadError, setLoadError] = useState('')
@@ -103,6 +39,7 @@ export default function CloudDrive() {
   const [folderFormOpen, setFolderFormOpen] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
+  const [download, setDownload] = useState<{ name: string; receivedBytes: number; totalBytes: number } | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [actionError, setActionError] = useState('')
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -115,6 +52,7 @@ export default function CloudDrive() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const currentIdRef = useRef(current.id)
   const dragDepthRef = useRef(0)
+  const downloadControllerRef = useRef<AbortController | null>(null)
   const cardBusy = downloadingId !== null || deletingId !== null || renamingId !== null || moveTarget !== null || shareTarget !== null
 
   useEffect(() => {
@@ -156,15 +94,17 @@ export default function CloudDrive() {
     else setRefreshing(true)
     setLoadError('')
     try {
-      setItems(await listFiles(parentId))
+      const items = await listFiles(parentId)
+      if (masterKey) setEntries(await resolveDriveItems(masterKey, items))
+      else setEntries(items.map((item) => ({ item, name: item.enc === 1 ? '无法解密的项目' : item.name, status: item.enc === 1 ? 'failed' : 'plain' })))
     } catch (error) {
-      if (mode === 'initial') setItems([])
+      if (mode === 'initial') setEntries([])
       setLoadError(requestErrorMessage(error, 'list'))
     } finally {
       if (mode === 'initial') setLoading(false)
       else setRefreshing(false)
     }
-  }, [])
+  }, [masterKey])
 
   const handleUploadDone = useCallback((parentId: string | null) => {
     if (parentId === currentIdRef.current) void loadDirectory(currentIdRef.current, 'refresh')
@@ -182,8 +122,8 @@ export default function CloudDrive() {
     }
   }, [current.id, loadDirectory])
 
-  function enterDirectory(directory: DriveItem) {
-    setLevels((previous) => [...previous, { id: directory.id, name: directory.name }])
+  function enterDirectory(directory: DriveItem, name: string) {
+    setLevels((previous) => [...previous, { id: directory.id, name }])
   }
 
   function goToLevel(index: number) {
@@ -237,16 +177,20 @@ export default function CloudDrive() {
 
   async function handleCreateDirectory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const name = folderName.trim()
-    if (!name) {
-      setCreateError('请输入文件夹名称。')
+    const check = checkName(folderName)
+    if (!check.ok) {
+      setCreateError(nameProblemMessage(check.problem, check.length))
       return
     }
-
+    if (!masterKey) {
+      setCreateError('文件加密密钥尚未就绪，请刷新页面重试。')
+      return
+    }
     setCreating(true)
     setCreateError('')
     try {
-      await createDirectory(name, current.id)
+      const payload = await buildCreateDirectoryPayload(masterKey, check.normalized)
+      await createDirectory({ id: payload.id, parentId: current.id, encName: payload.encName, nameKey: payload.nameKey })
       setFolderName('')
       setFolderFormOpen(false)
       await loadDirectory(current.id, 'refresh')
@@ -258,21 +202,62 @@ export default function CloudDrive() {
   }
 
   async function handleDownload(item: DriveItem) {
-    setDownloadingId(item.id)
+    const entry = entries.find((candidate) => candidate.item.id === item.id)
+    const name = entry?.name ?? item.name
     setActionError('')
+    setDownloadingId(item.id)
+    if (item.enc !== 1) {
+      try {
+        await downloadFile(item.id)
+      } catch (error) {
+        setActionError(requestErrorMessage(error, 'download'))
+      } finally {
+        setDownloadingId(null)
+      }
+      return
+    }
+    if (!masterKey || !item.wrappedKey || item.size_bytes === null) {
+      setDownloadingId(null)
+      setActionError('文件已损坏或被篡改，无法解密')
+      return
+    }
+    const controller = new AbortController()
+    downloadControllerRef.current = controller
     try {
-      await downloadFile(item.id)
+      const fk = await fileKeyFor(masterKey, item.id, item.wrappedKey)
+      const totalBytes = plainSizeFromCipher(item.size_bytes)
+      setDownload({ name, receivedBytes: 0, totalBytes })
+      await downloadEncryptedFile({
+        fk,
+        fileId: item.id,
+        cipherSize: item.size_bytes,
+        fileName: name,
+        fetchRange: (start, end, signal) => fetchFileRange(item.id, start, end, signal),
+        onProgress: (receivedBytes, total) => setDownload({ name, receivedBytes, totalBytes: total }),
+        signal: controller.signal,
+      })
     } catch (error) {
-      setActionError(requestErrorMessage(error, 'download'))
+      if (error instanceof DownloadError) {
+        if (error.code === 'decrypt_failed') setActionError('文件已损坏或被篡改，无法解密')
+        else if (error.code === 'too_large') setActionError('文件太大，当前浏览器无法下载，请改用 Chrome 或 Edge')
+      } else if (error instanceof CryptoError && error.code === 'decrypt_failed') {
+        setActionError('文件已损坏或被篡改，无法解密')
+      } else {
+        setActionError(requestErrorMessage(error, 'download'))
+      }
     } finally {
+      if (downloadControllerRef.current === controller) downloadControllerRef.current = null
+      setDownload(null)
       setDownloadingId(null)
     }
   }
 
   async function handleDelete(item: DriveItem) {
+    const entry = entries.find((candidate) => candidate.item.id === item.id)
+    const name = entry?.name ?? item.name
     const message = item.kind === 'directory'
-      ? `确定把文件夹“${item.name}”及其中全部内容移到回收站吗？30 天内可以在回收站整体恢复。`
-      : `确定把“${item.name}”移到回收站吗？30 天内可以在回收站恢复。`
+      ? `确定把文件夹“${name}”及其中全部内容移到回收站吗？30 天内可以在回收站整体恢复。`
+      : `确定把“${name}”移到回收站吗？30 天内可以在回收站恢复。`
     if (!window.confirm(message)) return
     setDeletingId(item.id)
     setActionError('')
@@ -298,10 +283,15 @@ export default function CloudDrive() {
   }
 
   async function handleRenameSave(item: DriveItem, name: string) {
+    if (!masterKey) {
+      setActionError('文件加密密钥尚未就绪，请刷新页面重试。')
+      return
+    }
     setRenameSaving(true)
     setActionError('')
     try {
-      await renameItem(item.id, name)
+      const payload = await buildRenamePayload(masterKey, item, name)
+      await renameItem(item.id, payload)
       setRenamingId((active) => (active === item.id ? null : active))
       await loadDirectory(current.id, 'refresh')
     } catch (error) {
@@ -331,6 +321,8 @@ export default function CloudDrive() {
   function toggleFolderMenu(id: string) {
     setFolderMenuId((active) => (active === id ? null : id))
   }
+
+  const downloadPercent = download && download.totalBytes > 0 ? Math.min(100, Math.round((download.receivedBytes / download.totalBytes) * 100)) : 0
 
   return (
     <section className="drive-content" aria-labelledby="drive-heading">
@@ -386,13 +378,23 @@ export default function CloudDrive() {
         </form>
       )}
       {actionError && <div className="drive-alert" role="alert"><span>{actionError}</span><button type="button" onClick={() => setActionError('')}>关闭</button></div>}
+      {download && (
+        <div className="drive-download-progress" role="status">
+          <span className="drive-download-name">{download.name}</span>
+          <span className="drive-download-size">{formatFileSize(download.receivedBytes)} / {formatFileSize(download.totalBytes)}</span>
+          <button type="button" onClick={() => downloadControllerRef.current?.abort()}>取消</button>
+          <div className="upload-progress" role="progressbar" aria-valuemin={0} aria-valuemax={download.totalBytes} aria-valuenow={download.receivedBytes} aria-label="下载进度">
+            <span className="upload-progress-fill" style={{ width: `${downloadPercent}%` }} />
+          </div>
+        </div>
+      )}
       {loadError && (
         <div className="drive-alert" role="alert">
           <span>{loadError}</span>
           <button type="button" onClick={() => void loadDirectory(current.id, 'refresh')}>重试</button>
         </div>
       )}
-      <UploadQueue ref={uploadQueueRef} onItemDone={handleUploadDone} />
+      <UploadQueue ref={uploadQueueRef} onItemDone={handleUploadDone} masterKey={masterKey} />
       <div
         className="drive-list-panel"
         onDragEnter={handleDragEnter}
@@ -407,7 +409,7 @@ export default function CloudDrive() {
         )}
         {loading ? (
           <p className="drive-state" aria-live="polite">正在加载目录…</p>
-        ) : items.length === 0 ? (
+        ) : entries.length === 0 ? (
           <div className="drive-state">
             <span className="drive-state-icon" aria-hidden="true"><EmptyIcon /></span>
             <h3>这里还没有文件</h3>
@@ -415,24 +417,26 @@ export default function CloudDrive() {
           </div>
         ) : (
           <div className="drive-grid">
-            {items.map((item) => (
-              item.kind === 'directory' ? (
+            {entries.map(({ item, name, status }) => {
+              const undecryptable = status === 'failed'
+              return item.kind === 'directory' ? (
                 <div className="drive-folder-card" key={item.id}>
                   {renamingId === item.id ? (
-                    <RenameInput item={item} saving={renameSaving} onSave={(name) => void handleRenameSave(item, name)} onCancel={cancelRename} />
+                    <RenameInput item={item} name={name} saving={renameSaving} onSave={(value) => void handleRenameSave(item, value)} onCancel={cancelRename} />
                   ) : (
-                    <button className="drive-folder-main" type="button" onClick={() => enterDirectory(item)}>
+                    <button className="drive-folder-main" type="button" onClick={() => enterDirectory(item, name)}>
                       <span className="drive-folder-icon" aria-hidden="true"><FolderIcon /></span>
-                      <span className="drive-folder-name">{displayItemName(item.name, 'directory')}</span>
+                      <span className="drive-folder-name">{name}</span>
+                      {status === 'plain' && <span className="drive-enc-tag">未加密</span>}
                     </button>
                   )}
                   <div className="drive-folder-more">
-                    <button type="button" className="drive-more-button" aria-label={`${item.name} 更多操作`} onClick={() => toggleFolderMenu(item.id)} disabled={cardBusy}>
+                    <button type="button" className="drive-more-button" aria-label={`${name} 更多操作`} onClick={() => toggleFolderMenu(item.id)} disabled={cardBusy}>
                       <MoreIcon />
                     </button>
                     {folderMenuId === item.id && (
                       <div className="drive-folder-menu" role="menu">
-                        <button type="button" role="menuitem" onClick={() => { setFolderMenuId(null); startRename(item) }}>改名</button>
+                        <button type="button" role="menuitem" disabled={undecryptable} onClick={() => { setFolderMenuId(null); startRename(item) }}>改名</button>
                         <button type="button" role="menuitem" onClick={() => { setFolderMenuId(null); startMove(item) }}>移动</button>
                         <button type="button" role="menuitem" className="danger-text-button" onClick={() => { setFolderMenuId(null); void handleDelete(item) }}>
                           {deletingId === item.id ? '删除中…' : '删除'}
@@ -446,39 +450,44 @@ export default function CloudDrive() {
                   <div className="drive-file-heading">
                     <span className="drive-file-icon" aria-hidden="true"><FileIcon /></span>
                     {renamingId === item.id ? (
-                      <RenameInput item={item} saving={renameSaving} onSave={(name) => void handleRenameSave(item, name)} onCancel={cancelRename} />
+                      <RenameInput item={item} name={name} saving={renameSaving} onSave={(value) => void handleRenameSave(item, value)} onCancel={cancelRename} />
                     ) : (
-                      <strong className="drive-file-name" title={displayItemName(item.name, 'file')}>{displayItemName(item.name, 'file')}</strong>
+                      <strong className="drive-file-name" title={name}>
+                        {name}
+                        {status === 'plain' && <span className="drive-enc-tag">未加密</span>}
+                      </strong>
                     )}
                   </div>
                   <div className="drive-file-meta">
-                    <span>{formatFileSize(item.size_bytes)} · {item.mime_type ?? '类型未知'}</span>
+                    <span>{plainSizeLabel(item)}{item.enc !== 1 && ` · ${item.mime_type ?? '类型未知'}`}</span>
                     <span>{formatUpdatedAt(item.updated_at)}</span>
                   </div>
                   <div className="drive-file-actions">
-                    <button type="button" onClick={() => void handleDownload(item)} disabled={cardBusy}>
+                    <button type="button" onClick={() => void handleDownload(item)} disabled={cardBusy || undecryptable}>
                       {downloadingId === item.id ? '下载中…' : '下载'}
                     </button>
-                    <button type="button" onClick={() => startRename(item)} disabled={cardBusy}>改名</button>
+                    <button type="button" onClick={() => startRename(item)} disabled={cardBusy || undecryptable || item.enc === 0} title={item.enc === 0 ? '旧的未加密文件不能改名，请重新上传' : undefined}>改名</button>
                     <button type="button" onClick={() => startMove(item)} disabled={cardBusy}>移动</button>
-                    <button type="button" onClick={() => startShare(item)} disabled={cardBusy}>分享</button>
+                    <button type="button" onClick={() => startShare(item)} disabled={cardBusy || undecryptable}>分享</button>
                     <button type="button" className="danger-text-button" onClick={() => void handleDelete(item)} disabled={cardBusy}>
                       {deletingId === item.id ? '删除中…' : '删除'}
                     </button>
                   </div>
                 </article>
               )
-            ))}
+            })}
           </div>
         )}
       </div>
-      {shareTarget && (
-        <ShareDialog item={shareTarget} onClose={() => setShareTarget(null)} />
+      {shareTarget && masterKey && (
+        <ShareDialog item={shareTarget} displayName={entries.find((entry) => entry.item.id === shareTarget.id)?.name ?? shareTarget.name} masterKey={masterKey} onClose={() => setShareTarget(null)} />
       )}
-      {moveTarget && (
+      {moveTarget && masterKey && (
         <MoveDialog
           item={moveTarget}
+          displayName={entries.find((entry) => entry.item.id === moveTarget.id)?.name ?? moveTarget.name}
           parentName={current.name}
+          masterKey={masterKey}
           onClose={() => setMoveTarget(null)}
           onMoved={handleMoveDone}
           onError={(message) => setActionError(message)}

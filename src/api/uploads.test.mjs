@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { UploadsRequestError, uploadFile } from './uploads.ts'
+import { cancelUpload, createUpload, getUploadProgress, uploadChunk, UploadsRequestError } from './uploads.ts'
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -16,9 +16,11 @@ function driveItem() {
     kind: 'file',
     name: 'x.bin',
     size_bytes: 200,
-    mime_type: null,
+    mime_type: 'application/octet-stream',
     created_at: '2026-01-01T00:00:00.000Z',
     updated_at: '2026-01-01T00:00:00.000Z',
+    enc: 1,
+    wrappedKey: 'wrapped',
   }
 }
 
@@ -37,296 +39,118 @@ function offsetOf(request) {
   return Number(new URL(request.input, 'http://cloudhub.test').searchParams.get('offset'))
 }
 
-test('uploads a file in two chunks and returns the item', async () => {
-  const file = new File([new Uint8Array(200)], 'hello.bin', { type: 'application/octet-stream' })
+test('createUpload posts the encrypted upload fields', async () => {
+  let request
+  const restore = globalThis.fetch
+  globalThis.fetch = async (input, init) => {
+    request = { input, init }
+    return json({ uploadId: 'u1', chunkSize: 33554432, receivedBytes: 0 }, 201)
+  }
+  try {
+    const result = await createUpload({
+      id: 'f1',
+      parentId: 'parent/id',
+      encName: 'enc',
+      nameKey: 'nk',
+      wrappedKey: 'wk',
+      size: 33554460,
+    })
+    assert.equal(request.input, '/api/uploads')
+    assert.equal(request.init.method, 'POST')
+    assert.deepEqual(JSON.parse(request.init.body), {
+      id: 'f1',
+      parentId: 'parent/id',
+      encName: 'enc',
+      nameKey: 'nk',
+      wrappedKey: 'wk',
+      size: 33554460,
+    })
+    assert.deepEqual(result, { uploadId: 'u1', chunkSize: 33554432, receivedBytes: 0 })
+  } finally {
+    globalThis.fetch = restore
+  }
+})
+
+test('createUpload surfaces an id_conflict error', async () => {
+  const { restore } = mockFetch(() => json({ error: 'id_conflict' }, 409))
+  try {
+    await assert.rejects(
+      () => createUpload({ id: 'f1', parentId: null, encName: 'enc', nameKey: 'nk', wrappedKey: 'wk', size: 28 }),
+      (error) => error instanceof UploadsRequestError && error.status === 409 && error.code === 'id_conflict',
+    )
+  } finally {
+    restore()
+  }
+})
+
+test('uploadChunk puts the chunk at the cipher offset and returns the result', async () => {
   const item = driveItem()
-  const progress = []
   const { calls, restore } = mockFetch((request) => {
-    if (request.init.method === 'POST') return json({ uploadId: 'u1', chunkSize: 100, receivedBytes: 0 }, 201)
-    if (request.init.method === 'PUT') {
-      if (offsetOf(request) === 0) return json({ receivedBytes: 100, done: false })
-      return json({ receivedBytes: 200, done: true, item })
-    }
-    throw new Error(`unexpected request ${request.init.method} ${request.input}`)
+    if (offsetOf(request) === 33554432) return json({ receivedBytes: 33554460, done: true, item })
+    return json({ receivedBytes: 33554432, done: false })
   })
   try {
-    const result = await uploadFile(file, null, { onProgress: (received, total) => progress.push([received, total]) })
-    assert.deepEqual(result, item)
-    const puts = calls.filter((call) => call.init.method === 'PUT')
-    assert.equal(puts.length, 2)
-    assert.equal(offsetOf(puts[1]), 100)
-    assert.equal(puts[1].init.body.size, 100)
-    assert.ok(progress.length >= 2)
-    assert.deepEqual(progress[progress.length - 1], [200, 200])
+    const first = await uploadChunk('u1', 0, new Blob([new Uint8Array(28)]))
+    assert.equal(offsetOf(calls[0]), 0)
+    assert.equal(calls[0].init.method, 'PUT')
+    assert.deepEqual(first, { receivedBytes: 33554432, done: false, item: undefined })
+    const second = await uploadChunk('u1', 33554432, new Blob([new Uint8Array(28)]))
+    assert.equal(offsetOf(calls[1]), 33554432)
+    assert.deepEqual(second, { receivedBytes: 33554460, done: true, item })
   } finally {
     restore()
   }
 })
 
-test('resumes from the server-reported receivedBytes when a chunk is partially accepted', async () => {
-  const data = new Uint8Array(256)
-  for (let index = 0; index < data.length; index += 1) data[index] = index % 256
-  const file = new File([data], 'x.bin')
-  const { calls, restore } = mockFetch((request) => {
-    if (request.init.method === 'POST') return json({ uploadId: 'u1', chunkSize: 128, receivedBytes: 0 }, 201)
-    if (request.init.method === 'PUT') {
-      if (offsetOf(request) === 0) return json({ receivedBytes: 64, done: false })
-      return json({ receivedBytes: 256, done: true, item: driveItem() })
-    }
-    throw new Error(`unexpected request ${request.init.method} ${request.input}`)
-  })
-  try {
-    await uploadFile(file, null)
-    const puts = calls.filter((call) => call.init.method === 'PUT')
-    assert.equal(puts.length, 2)
-    assert.equal(offsetOf(puts[1]), 64)
-    const post = calls.find((call) => call.init.method === 'POST')
-    assert.equal(JSON.parse(post.init.body).mimeType, null)
-    const body = new Uint8Array(await puts[1].init.body.arrayBuffer())
-    assert.equal(body.length, 128)
-    assert.equal(body[0], 64)
-  } finally {
-    restore()
-  }
-})
-
-test('continues from the receivedBytes in a 409 offset_mismatch without counting a failure', async () => {
-  const file = new File([new Uint8Array(200)], 'x.bin')
-  const { calls, restore } = mockFetch((request) => {
-    if (request.init.method === 'POST') return json({ uploadId: 'u1', chunkSize: 100, receivedBytes: 0 }, 201)
-    if (request.init.method === 'PUT') {
-      if (offsetOf(request) === 0) return json({ error: 'offset_mismatch', receivedBytes: 150 }, 409)
-      return json({ receivedBytes: 200, done: true, item: driveItem() })
-    }
-    throw new Error(`unexpected request ${request.init.method} ${request.input}`)
-  })
-  try {
-    await uploadFile(file, null)
-    const puts = calls.filter((call) => call.init.method === 'PUT')
-    assert.equal(puts.length, 2)
-    assert.equal(offsetOf(puts[1]), 150)
-    assert.equal(calls.filter((call) => call.init.method === 'GET').length, 0)
-  } finally {
-    restore()
-  }
-})
-
-test('recovers from a single 503 after reconciling progress via GET', async () => {
-  const file = new File([new Uint8Array(200)], 'x.bin')
-  let putCount = 0
-  const { calls, restore } = mockFetch((request) => {
-    if (request.init.method === 'POST') return json({ uploadId: 'u1', chunkSize: 100, receivedBytes: 0 }, 201)
-    if (request.init.method === 'PUT') {
-      putCount += 1
-      if (putCount === 1) return json({ error: 'storage_unavailable' }, 503)
-      return json({ receivedBytes: 200, done: true, item: driveItem() })
-    }
-    if (request.init.method === 'GET') return json({ receivedBytes: 0, total: 200, done: false })
-    throw new Error(`unexpected request ${request.init.method} ${request.input}`)
-  })
-  try {
-    const result = await uploadFile(file, null, { retryDelays: [1, 1, 1] })
-    assert.deepEqual(result, driveItem())
-    assert.equal(putCount, 2)
-    assert.equal(calls.filter((call) => call.init.method === 'GET').length, 1)
-  } finally {
-    restore()
-  }
-})
-
-test('gives up after three consecutive 503s', async () => {
-  const file = new File([new Uint8Array(200)], 'x.bin')
-  let putCount = 0
-  const { calls, restore } = mockFetch((request) => {
-    if (request.init.method === 'POST') return json({ uploadId: 'u1', chunkSize: 100, receivedBytes: 0 }, 201)
-    if (request.init.method === 'PUT') {
-      putCount += 1
-      return json({ error: 'storage_unavailable' }, 503)
-    }
-    if (request.init.method === 'GET') return json({ receivedBytes: 0, total: 200, done: false })
-    throw new Error(`unexpected request ${request.init.method} ${request.input}`)
-  })
+test('uploadChunk surfaces receivedBytes on offset_mismatch', async () => {
+  const { restore } = mockFetch(() => json({ error: 'offset_mismatch', receivedBytes: 67108864 }, 409))
   try {
     await assert.rejects(
-      uploadFile(file, null, { retryDelays: [1, 1, 1] }),
-      (error) => error instanceof UploadsRequestError && error.status === 503,
+      () => uploadChunk('u1', 0, new Blob([new Uint8Array(28)])),
+      (error) => error instanceof UploadsRequestError
+        && error.status === 409
+        && error.code === 'offset_mismatch'
+        && error.receivedBytes === 67108864,
     )
-    assert.equal(putCount, 3)
-    assert.equal(calls.filter((call) => call.init.method === 'GET').length, 2)
   } finally {
     restore()
   }
 })
 
-test('fails immediately on 410 without retrying', async () => {
-  const file = new File([new Uint8Array(100)], 'x.bin')
-  let putCount = 0
-  const { calls, restore } = mockFetch((request) => {
-    if (request.init.method === 'POST') return json({ uploadId: 'u1', chunkSize: 100, receivedBytes: 0 }, 201)
-    if (request.init.method === 'PUT') {
-      putCount += 1
-      return json({ error: 'upload_expired' }, 410)
-    }
-    throw new Error(`unexpected request ${request.init.method} ${request.input}`)
-  })
+test('getUploadProgress parses the progress fields', async () => {
+  const { restore } = mockFetch(() => json({ receivedBytes: 33554432, total: 33554460, done: false }))
   try {
-    await assert.rejects(
-      uploadFile(file, null, { retryDelays: [1, 1, 1] }),
-      (error) => error instanceof UploadsRequestError && error.status === 410 && error.code === 'upload_expired',
-    )
-    assert.equal(putCount, 1)
-    assert.equal(calls.filter((call) => call.init.method === 'GET').length, 0)
+    assert.deepEqual(await getUploadProgress('u1'), { receivedBytes: 33554432, total: 33554460, done: false })
   } finally {
     restore()
   }
 })
 
-test('cancels the session and throws aborted when the signal fires', async () => {
-  const file = new File([new Uint8Array(300)], 'x.bin')
-  const controller = new AbortController()
-  let deleted = false
+test('cancelUpload deletes the session', async () => {
+  let method
   const { restore } = mockFetch((request) => {
-    if (request.init.method === 'POST') return json({ uploadId: 'u1', chunkSize: 100, receivedBytes: 0 }, 201)
-    if (request.init.method === 'PUT') {
-      return new Promise((_resolve, reject) => {
-        request.init.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
-      })
-    }
-    if (request.init.method === 'DELETE') {
-      deleted = true
-      return json({ ok: true })
-    }
-    throw new Error(`unexpected request ${request.init.method} ${request.input}`)
+    method = request.init.method
+    return json({ ok: true })
   })
   try {
-    const pending = uploadFile(file, null, { signal: controller.signal, retryDelays: [1, 1, 1] })
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    controller.abort()
-    await assert.rejects(
-      pending,
-      (error) => error instanceof UploadsRequestError && error.code === 'aborted',
-    )
-    assert.equal(deleted, true)
+    await cancelUpload('u1')
+    assert.equal(method, 'DELETE')
   } finally {
     restore()
   }
 })
 
-function installFakeXhr(respond) {
-  const sent = []
-  class FakeXhr {
-    constructor() {
-      this.upload = {}
-      this.status = 0
-      this.responseText = ''
-    }
-    open(method, path) { this.method = method; this.path = path }
-    setRequestHeader() {}
-    abort() { queueMicrotask(() => this.onabort?.()) }
-    send(body) {
-      sent.push({ path: this.path, size: body.size })
-      queueMicrotask(() => respond(this, body))
-    }
-  }
-  const original = globalThis.XMLHttpRequest
-  globalThis.XMLHttpRequest = FakeXhr
-  return { sent, restore: () => { globalThis.XMLHttpRequest = original } }
-}
-
-function finishXhr(xhr, status, body) {
-  xhr.status = status
-  xhr.responseText = JSON.stringify(body)
-  xhr.onload?.()
-}
-
-test('xhr chunk upload reports progress inside a chunk', async () => {
-  const file = new File([new Uint8Array(200)], 'x.bin')
-  const { restore } = mockFetch((request) => {
-    if (request.init.method === 'POST') return json({ uploadId: 'u1', chunkSize: 100, receivedBytes: 0 }, 201)
-    throw new Error('unexpected fetch')
-  })
-  const xhr = installFakeXhr((instance, body) => {
-    const offset = Number(new URL(instance.path, 'http://cloudhub.test').searchParams.get('offset'))
-    instance.upload.onprogress?.({ loaded: 40 })
-    instance.upload.onprogress?.({ loaded: 999 })
-    const end = offset + body.size
-    finishXhr(instance, 200, end === 200 ? { receivedBytes: 200, done: true, item: driveItem() } : { receivedBytes: end, done: false })
-  })
-  const progress = []
-  try {
-    const result = await uploadFile(file, null, { onProgress: (received) => progress.push(received) })
-    assert.deepEqual(result, driveItem())
-    assert.deepEqual(progress, [40, 100, 100, 140, 200, 200])
-    assert.deepEqual(xhr.sent.map((entry) => entry.size), [100, 100])
-  } finally {
-    xhr.restore()
-    restore()
-  }
-})
-
-test('xhr chunk upload parses offset_mismatch and error codes', async () => {
-  const file = new File([new Uint8Array(200)], 'x.bin')
-  const { calls, restore } = mockFetch((request) => {
-    if (request.init.method === 'POST') return json({ uploadId: 'u1', chunkSize: 100, receivedBytes: 0 }, 201)
-    if (request.init.method === 'DELETE') return json({ ok: true })
-    throw new Error('unexpected fetch')
-  })
-  let count = 0
-  const xhr = installFakeXhr((instance) => {
-    count += 1
-    if (count === 1) finishXhr(instance, 409, { error: 'offset_mismatch', receivedBytes: 100 })
-    else finishXhr(instance, 410, { error: 'upload_expired' })
-  })
+test('createUpload parses storage_full required and largestAvailable from a 507', async () => {
+  const { restore } = mockFetch(() => json({ error: 'storage_full', required: 500, largestAvailable: 100 }, 507))
   try {
     await assert.rejects(
-      uploadFile(file, null, { retryDelays: [1, 1, 1] }),
-      (error) => error instanceof UploadsRequestError && error.status === 410 && error.code === 'upload_expired',
-    )
-    assert.deepEqual(xhr.sent.map((entry) => entry.path), ['/api/uploads/u1/chunk?offset=0', '/api/uploads/u1/chunk?offset=100'])
-    assert.equal(calls.filter((call) => call.init.method === 'DELETE').length, 1)
-  } finally {
-    xhr.restore()
-    restore()
-  }
-})
-
-test('xhr chunk upload aborts the request and cancels the session', async () => {
-  const file = new File([new Uint8Array(200)], 'x.bin')
-  const controller = new AbortController()
-  const { calls, restore } = mockFetch((request) => {
-    if (request.init.method === 'POST') return json({ uploadId: 'u1', chunkSize: 100, receivedBytes: 0 }, 201)
-    if (request.init.method === 'DELETE') return json({ ok: true })
-    throw new Error('unexpected fetch')
-  })
-  const xhr = installFakeXhr(() => controller.abort())
-  try {
-    await assert.rejects(
-      uploadFile(file, null, { signal: controller.signal }),
-      (error) => error instanceof UploadsRequestError && error.code === 'aborted',
-    )
-    assert.equal(calls.filter((call) => call.init.method === 'DELETE').length, 1)
-  } finally {
-    xhr.restore()
-    restore()
-  }
-})
-
-test('parses storage_full required and largestAvailable from a 507', async () => {
-  const file = new File([new Uint8Array(500)], 'big.bin')
-  const { calls, restore } = mockFetch((request) => {
-    if (request.init.method === 'POST') return json({ error: 'storage_full', required: 500, largestAvailable: 100 }, 507)
-    throw new Error('unexpected request')
-  })
-  try {
-    await assert.rejects(
-      uploadFile(file, null),
+      () => createUpload({ id: 'f1', parentId: null, encName: 'enc', nameKey: 'nk', wrappedKey: 'wk', size: 500 }),
       (error) => error instanceof UploadsRequestError
         && error.status === 507
         && error.code === 'storage_full'
         && error.required === 500
         && error.largestAvailable === 100,
     )
-    assert.equal(calls.filter((call) => call.init.method === 'DELETE').length, 0)
   } finally {
     restore()
   }

@@ -2,6 +2,9 @@ export type ShareView = {
   id: string
   fileId: string
   fileName: string
+  enc: 0 | 1
+  encName: string
+  wrappedKey: string | null
   url: string
   expiresAt: string | null
   revokedAt: string | null
@@ -11,10 +14,13 @@ export type ShareView = {
 }
 
 export type PublicShareMetadata = {
-  name: string
+  enc: 0 | 1
+  encName: string | null
+  name: string | null
   sizeBytes: number | null
   mimeType: string | null
   expiresAt: string | null
+  id: string | null
 }
 
 type ShareResponse = {
@@ -22,10 +28,13 @@ type ShareResponse = {
   shares?: ShareView[]
   revoked?: boolean
   error?: string
+  enc?: number
+  encName?: string
   name?: string
   sizeBytes?: number | null
   mimeType?: string | null
   expiresAt?: string | null
+  id?: string
 }
 
 export class SharesRequestError extends Error {
@@ -95,9 +104,40 @@ export async function revokeShare(shareId: string): Promise<void> {
 export async function getPublicShare(token: string): Promise<PublicShareMetadata> {
   const payload = await requestShares(`/api/public/shares/${encodeURIComponent(token)}`)
   return {
-    name: payload.name ?? '',
+    enc: payload.enc === 1 ? 1 : 0,
+    encName: typeof payload.encName === 'string' ? payload.encName : null,
+    name: typeof payload.name === 'string' ? payload.name : null,
     sizeBytes: payload.sizeBytes ?? null,
     mimeType: payload.mimeType ?? null,
     expiresAt: payload.expiresAt ?? null,
+    id: typeof payload.id === 'string' ? payload.id : null,
   }
+}
+
+export async function fetchPublicShareRange(
+  token: string,
+  start: number,
+  end: number,
+  signal?: AbortSignal,
+): Promise<Uint8Array<ArrayBuffer>> {
+  let response: Response
+  try {
+    response = await fetch(`/api/public/shares/${encodeURIComponent(token)}/download`, {
+      headers: { Range: `bytes=${start}-${end - 1}` },
+      signal,
+    })
+  } catch {
+    if (signal?.aborted) throw new SharesRequestError(0, 'aborted')
+    throw new SharesRequestError(0, 'network_error')
+  }
+  if (!response.ok) {
+    let payload: ShareResponse = {}
+    try {
+      payload = await response.json() as ShareResponse
+    } catch {
+      // The status still provides a safe error category.
+    }
+    throw new SharesRequestError(response.status, payload.error ?? 'request_failed')
+  }
+  return new Uint8Array(await response.arrayBuffer())
 }

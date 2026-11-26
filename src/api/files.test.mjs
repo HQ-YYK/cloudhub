@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { deleteFile, downloadFile, moveItem, renameItem } from './files.ts'
+import { createDirectory, deleteFile, downloadFile, fetchFileRange, moveItem, renameItem } from './files.ts'
 
 function mockFetch(response, capture) {
   const original = globalThis.fetch
@@ -69,10 +69,10 @@ test('delete uses DELETE and the encoded file ID', async () => {
   }
 })
 
-test('rename uses PATCH and the encoded file ID', async () => {
+test('rename sends the encrypted name fields', async () => {
   let request
   const restore = mockFetch(
-    new Response(JSON.stringify({ item: { id: 'file/id', name: 'new.txt' } }), {
+    new Response(JSON.stringify({ item: { id: 'file/id', enc: 1, name: 'enc' } }), {
       headers: { 'Content-Type': 'application/json' },
     }),
     (input, init) => {
@@ -80,11 +80,11 @@ test('rename uses PATCH and the encoded file ID', async () => {
     },
   )
   try {
-    await renameItem('file/id', 'new.txt')
+    await renameItem('file/id', { encName: 'enc', nameKey: 'nk' })
     assert.equal(request.input, '/api/files/file%2Fid')
     assert.equal(request.init.method, 'PATCH')
     assert.equal(request.init.credentials, 'same-origin')
-    assert.deepEqual(JSON.parse(request.init.body), { name: 'new.txt' })
+    assert.deepEqual(JSON.parse(request.init.body), { encName: 'enc', nameKey: 'nk' })
   } finally {
     restore()
   }
@@ -105,6 +105,45 @@ test('move uses PATCH and sends the target parentId', async () => {
     assert.equal(request.input, '/api/files/file%2Fid')
     assert.equal(request.init.method, 'PATCH')
     assert.deepEqual(JSON.parse(request.init.body), { parentId: 'parent/id' })
+  } finally {
+    restore()
+  }
+})
+
+test('createDirectory posts the encrypted directory fields', async () => {
+  let request
+  const restore = mockFetch(
+    new Response(JSON.stringify({ item: { id: 'd1' } }), {
+      status: 201,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+    (input, init) => {
+      request = { input, init }
+    },
+  )
+  try {
+    await createDirectory({ id: 'd1', parentId: 'parent/id', encName: 'enc', nameKey: 'nk' })
+    assert.equal(request.input, '/api/files/directories')
+    assert.equal(request.init.method, 'POST')
+    assert.deepEqual(JSON.parse(request.init.body), { id: 'd1', parent_id: 'parent/id', encName: 'enc', nameKey: 'nk' })
+  } finally {
+    restore()
+  }
+})
+
+test('fetchFileRange requests a byte range and returns the bytes', async () => {
+  let request
+  const restore = mockFetch(
+    new Response('abcdef', { headers: { 'Content-Type': 'application/octet-stream' } }),
+    (input, init) => {
+      request = { input, init }
+    },
+  )
+  try {
+    const bytes = await fetchFileRange('file/id', 100, 106)
+    assert.equal(request.input, '/api/files/file%2Fid/download')
+    assert.equal(request.init.headers.Range, 'bytes=100-105')
+    assert.deepEqual([...bytes], [...new TextEncoder().encode('abcdef')])
   } finally {
     restore()
   }

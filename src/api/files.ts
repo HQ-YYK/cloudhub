@@ -7,6 +7,8 @@ export type DriveItem = {
   mime_type: string | null
   created_at: string
   updated_at: string
+  enc: 0 | 1
+  wrappedKey: string | null
 }
 
 type FilesResponse = {
@@ -63,14 +65,28 @@ export async function listFiles(parentId: string | null): Promise<DriveItem[]> {
   return payload.items
 }
 
-export async function createDirectory(name: string, parentId: string | null): Promise<DriveItem> {
+export type CreateDirectoryInput = {
+  id: string
+  parentId: string | null
+  encName: string
+  nameKey: string
+}
+
+export async function createDirectory(input: CreateDirectoryInput): Promise<DriveItem> {
   const payload = await requestFiles('/api/files/directories', {
     method: 'POST',
-    body: JSON.stringify({ name, parent_id: parentId }),
+    body: JSON.stringify({
+      id: input.id,
+      parent_id: input.parentId,
+      encName: input.encName,
+      nameKey: input.nameKey,
+    }),
   })
   if (!payload.item) throw new FilesRequestError(500, 'invalid_response')
   return payload.item
 }
+
+export type RenameInput = { encName: string; nameKey: string }
 
 function responseFileName(response: Response) {
   const disposition = response.headers.get('Content-Disposition') ?? ''
@@ -114,6 +130,35 @@ export async function downloadFile(fileId: string): Promise<void> {
   URL.revokeObjectURL(objectUrl)
 }
 
+export async function fetchFileRange(
+  fileId: string,
+  start: number,
+  end: number,
+  signal?: AbortSignal,
+): Promise<Uint8Array<ArrayBuffer>> {
+  let response: Response
+  try {
+    response = await fetch(`/api/files/${encodeURIComponent(fileId)}/download`, {
+      credentials: 'same-origin',
+      headers: { Range: `bytes=${start}-${end - 1}` },
+      signal,
+    })
+  } catch {
+    if (signal?.aborted) throw new FilesRequestError(0, 'aborted')
+    throw new FilesRequestError(0, 'network_error')
+  }
+  if (!response.ok) {
+    let payload: FilesResponse = {}
+    try {
+      payload = await response.json() as FilesResponse
+    } catch {
+      // The status still provides a safe error category.
+    }
+    throw new FilesRequestError(response.status, payload.error ?? 'request_failed')
+  }
+  return new Uint8Array(await response.arrayBuffer())
+}
+
 export async function deleteFile(fileId: string): Promise<void> {
   const payload = await requestFiles(`/api/files/${encodeURIComponent(fileId)}`, {
     method: 'DELETE',
@@ -121,10 +166,10 @@ export async function deleteFile(fileId: string): Promise<void> {
   if (payload.deleted !== true) throw new FilesRequestError(500, 'invalid_response')
 }
 
-export async function renameItem(id: string, name: string): Promise<DriveItem> {
+export async function renameItem(id: string, input: RenameInput): Promise<DriveItem> {
   const payload = await requestFiles(`/api/files/${encodeURIComponent(id)}`, {
     method: 'PATCH',
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ encName: input.encName, nameKey: input.nameKey }),
   })
   if (!payload.item) throw new FilesRequestError(500, 'invalid_response')
   return payload.item

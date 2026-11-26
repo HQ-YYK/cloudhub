@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { createShare, listSharesByFile, revokeShare, type ShareView } from '../api/shares'
 import type { DriveItem } from '../api/files'
+import { resolveShares, type ResolvedShare } from '../files/share'
 import ShareLinkRow from './ShareLinkRow'
 import { shareErrorMessage } from './share-error'
 
@@ -21,9 +22,24 @@ function CloseIcon() {
   )
 }
 
-export default function ShareDialog({ item, onClose }: { item: DriveItem; onClose: () => void }) {
+function shareWithItemFallback(share: ShareView, item: DriveItem): ShareView {
+  return {
+    ...share,
+    enc: (share.enc ?? item.enc) as 0 | 1,
+    encName: share.encName || item.name,
+    wrappedKey: share.wrappedKey ?? item.wrappedKey,
+  }
+}
+
+export default function ShareDialog({ item, displayName, masterKey, onClose }: {
+  item: DriveItem
+  displayName: string
+  masterKey: Uint8Array<ArrayBuffer>
+  onClose: () => void
+}) {
   const [expiresInDays, setExpiresInDays] = useState<ExpiryDays>(7)
   const [shares, setShares] = useState<ShareView[]>([])
+  const [resolved, setResolved] = useState<ResolvedShare[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [actionError, setActionError] = useState('')
@@ -56,6 +72,18 @@ export default function ShareDialog({ item, onClose }: { item: DriveItem; onClos
   }, [loadShares])
 
   useEffect(() => {
+    let active = true
+    resolveShares(masterKey, shares)
+      .then((value) => {
+        if (active) setResolved(value)
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [shares, masterKey])
+
+  useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') onClose()
     }
@@ -68,7 +96,7 @@ export default function ShareDialog({ item, onClose }: { item: DriveItem; onClos
     setActionError('')
     try {
       const share = await createShare(item.id, expiresInDays)
-      setShares((previous) => [share, ...previous])
+      setShares((previous) => [shareWithItemFallback(share, item), ...previous])
       setHighlightId(share.id)
     } catch (error) {
       setActionError(shareErrorMessage(error))
@@ -102,7 +130,7 @@ export default function ShareDialog({ item, onClose }: { item: DriveItem; onClos
         onClick={(event) => event.stopPropagation()}
       >
         <div className="share-dialog-header">
-          <h3 id="share-dialog-title">分享“{item.name}”</h3>
+          <h3 id="share-dialog-title">分享“{displayName}”</h3>
           <button type="button" className="share-dialog-close" onClick={onClose} aria-label="关闭"><CloseIcon /></button>
         </div>
         <div className="share-dialog-body">
@@ -122,6 +150,7 @@ export default function ShareDialog({ item, onClose }: { item: DriveItem; onClos
                 </button>
               ))}
             </div>
+            <p className="share-generate-hint">链接里带着解密密钥，拿到完整链接的人都能下载并打开这个文件。请只发给信任的人，必要时设置过期时间。</p>
             <button className="primary-small-button share-generate-button" type="button" onClick={() => void handleGenerate()} disabled={generating}>
               {generating ? '生成中…' : '生成链接'}
             </button>
@@ -133,14 +162,16 @@ export default function ShareDialog({ item, onClose }: { item: DriveItem; onClos
           </div>
           {loadError ? (
             <div className="drive-alert" role="alert"><span>{loadError}</span><button type="button" onClick={() => void loadShares()}>重试</button></div>
-          ) : shares.length === 0 && !loading ? (
+          ) : resolved.length === 0 && !loading ? (
             <p className="share-empty">还没有分享链接，选择有效期后点击「生成链接」。</p>
           ) : (
             <ul className="share-list">
-              {shares.map((share) => (
+              {resolved.map(({ share, name, fullUrl }) => (
                 <ShareLinkRow
                   key={share.id}
                   share={share}
+                  name={name}
+                  url={fullUrl}
                   highlight={share.id === highlightId}
                   revoking={revokingId === share.id}
                   onRevoke={() => void handleRevoke(share)}

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { emptyTrash, listTrash, purgeTrashItem, restoreTrashItem, type TrashItem } from '../api/trash'
 import { FilesRequestError } from '../api/files'
+import { useAuth } from '../auth/useAuth'
+import { resolveDisplayName } from '../files/session'
 import { FolderIcon } from './DriveIcons'
 
 function TrashEmptyIcon() {
@@ -76,7 +78,9 @@ function displayName(name: string, kind: 'file' | 'directory'): string {
 }
 
 export default function TrashBin() {
+  const { masterKey } = useAuth()
   const [items, setItems] = useState<TrashItem[]>([])
+  const [names, setNames] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [loadError, setLoadError] = useState('')
@@ -93,7 +97,17 @@ export default function TrashBin() {
     else setRefreshing(true)
     setLoadError('')
     try {
-      setItems(await listTrash())
+      const list = await listTrash()
+      setItems(list)
+      if (masterKey) {
+        const next: Record<string, string> = {}
+        await Promise.all(list.map(async (item) => {
+          next[item.id] = (await resolveDisplayName(masterKey, item)).name
+        }))
+        setNames(next)
+      } else {
+        setNames({})
+      }
     } catch (error) {
       if (mode === 'initial') setItems([])
       setLoadError(requestErrorMessage(error))
@@ -101,7 +115,7 @@ export default function TrashBin() {
       if (mode === 'initial') setLoading(false)
       else setRefreshing(false)
     }
-  }, [])
+  }, [masterKey])
 
   useEffect(() => {
     let active = true
@@ -134,9 +148,10 @@ export default function TrashBin() {
 
   async function handlePurge(item: TrashItem) {
     const count = item.item_count ?? 0
+    const name = names[item.id] ?? displayName(item.name, item.kind)
     const message = item.kind === 'directory'
       ? `彻底删除后无法恢复，文件夹中的 ${count} 项会一起删除。`
-      : `确定永久删除文件“${item.name}”吗？此操作无法撤销。`
+      : `确定永久删除文件“${name}”吗？此操作无法撤销。`
     if (!window.confirm(message)) return
     setPurgingId(item.id)
     setActionError('')
@@ -228,7 +243,7 @@ export default function TrashBin() {
                   <span className="drive-file-icon" aria-hidden="true">
                     {item.kind === 'directory' ? <FolderIcon /> : <FileIcon />}
                   </span>
-                  <strong className="drive-file-name" title={displayName(item.name, item.kind)}>{displayName(item.name, item.kind)}</strong>
+                  <strong className="drive-file-name" title={names[item.id] ?? displayName(item.name, item.kind)}>{names[item.id] ?? displayName(item.name, item.kind)}</strong>
                 </div>
                 <div className="drive-file-meta">
                   <span>

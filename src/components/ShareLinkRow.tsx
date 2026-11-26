@@ -20,8 +20,10 @@ function shareStatus(share: ShareView): { label: string; className: string } {
   return { label: '有效', className: 'is-active' }
 }
 
-export default function ShareLinkRow({ share, highlight, revoking, onRevoke }: {
+export default function ShareLinkRow({ share, name, url, highlight, revoking, onRevoke }: {
   share: ShareView
+  name: string
+  url: string
   highlight?: boolean
   revoking: boolean
   onRevoke: () => void
@@ -32,7 +34,7 @@ export default function ShareLinkRow({ share, highlight, revoking, onRevoke }: {
 
   async function handleCopy() {
     try {
-      await navigator.clipboard.writeText(share.url)
+      await navigator.clipboard.writeText(url)
       setNotice('已复制')
     } catch {
       setNotice('复制失败，请手动复制')
@@ -44,7 +46,7 @@ export default function ShareLinkRow({ share, highlight, revoking, onRevoke }: {
   return (
     <li className={`share-row${highlight ? ' is-new' : ''}`}>
       <div className="share-row-top">
-        <span className="share-row-name" title={share.fileName}>{share.fileName}</span>
+        <span className="share-row-name" title={name}>{name}</span>
         <span className={`share-status ${status.className}`}>{status.label}</span>
       </div>
       <div className="share-row-meta">
@@ -56,7 +58,7 @@ export default function ShareLinkRow({ share, highlight, revoking, onRevoke }: {
         <input
           ref={inputRef}
           readOnly
-          value={share.url}
+          value={url}
           onFocus={(event) => event.currentTarget.select()}
           aria-label="分享链接"
         />

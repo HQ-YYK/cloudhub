@@ -10,7 +10,7 @@ export type AuthContextValue = {
   error: string | null
   masterKey: Uint8Array<ArrayBuffer> | null
   pendingCredential: AccountCredential | null
-  login: (username: string, password: string) => Promise<string | null>
+  login: (username: string, password: string, keepUnlocked?: boolean) => Promise<string | null>
   verifyTotp: (challenge: string, credential: TotpCredential) => Promise<void>
   logout: () => Promise<void>
   setMasterKey: (masterKey: Uint8Array<ArrayBuffer> | null) => void

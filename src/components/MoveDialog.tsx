@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { FilesRequestError, listFiles, moveItem, type DriveItem } from '../api/files'
+import { resolveDisplayName } from '../files/session'
 
 interface MoveDialogProps {
   item: DriveItem
+  displayName: string
   parentName: string
+  masterKey: Uint8Array<ArrayBuffer>
   onClose: () => void
   onMoved: () => void
   onError: (message: string) => void
@@ -59,11 +62,12 @@ function FolderIcon() {
   )
 }
 
-function FolderRow({ node, depth, selectedId, disabledId, onSelect }: {
+function FolderRow({ node, depth, selectedId, disabledId, masterKey, onSelect }: {
   node: FolderNode
   depth: number
   selectedId: string | null
   disabledId: string | null
+  masterKey: Uint8Array<ArrayBuffer>
   onSelect: (id: string | null, name: string) => void
 }) {
   const [children, setChildren] = useState<FolderNode[] | null>(null)
@@ -84,7 +88,12 @@ function FolderRow({ node, depth, selectedId, disabledId, onSelect }: {
       setLoading(true)
       try {
         const items = await listFiles(node.id)
-        setChildren(items.filter((entry) => entry.kind === 'directory').map((entry) => ({ id: entry.id, name: entry.name })))
+        const folders = items.filter((entry) => entry.kind === 'directory')
+        const children = await Promise.all(folders.map(async (entry) => {
+          const display = await resolveDisplayName(masterKey, entry)
+          return { id: entry.id, name: display.name }
+        }))
+        setChildren(children)
       } catch {
         setChildren([])
       } finally {
@@ -122,6 +131,7 @@ function FolderRow({ node, depth, selectedId, disabledId, onSelect }: {
                 depth={depth + 1}
                 selectedId={selectedId}
                 disabledId={disabledId}
+                masterKey={masterKey}
                 onSelect={onSelect}
               />
             ))
@@ -132,7 +142,7 @@ function FolderRow({ node, depth, selectedId, disabledId, onSelect }: {
   )
 }
 
-export default function MoveDialog({ item, parentName, onClose, onMoved, onError }: MoveDialogProps) {
+export default function MoveDialog({ item, displayName, parentName, masterKey, onClose, onMoved, onError }: MoveDialogProps) {
   const [selectedId, setSelectedId] = useState<string | null>(item.parent_id)
   const [selectedName, setSelectedName] = useState<string>(parentName)
   const [moving, setMoving] = useState(false)
@@ -178,7 +188,7 @@ export default function MoveDialog({ item, parentName, onClose, onMoved, onError
         onClick={(event) => event.stopPropagation()}
       >
         <div className="move-dialog-header">
-          <h3 id="move-dialog-title">移动“{item.name}”到…</h3>
+          <h3 id="move-dialog-title">移动“{displayName}”到…</h3>
           <button type="button" className="move-dialog-close" onClick={onClose} aria-label="关闭">
             <CloseIcon />
           </button>
@@ -189,6 +199,7 @@ export default function MoveDialog({ item, parentName, onClose, onMoved, onError
             depth={0}
             selectedId={selectedId}
             disabledId={item.kind === 'directory' ? item.id : null}
+            masterKey={masterKey}
             onSelect={(id, name) => {
               setSelectedId(id)
               setSelectedName(name)

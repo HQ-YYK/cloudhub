@@ -123,7 +123,30 @@ test('revokeShare uses DELETE and the encoded share id', async () => {
   }
 })
 
-test('getPublicShare returns the metadata fields', async () => {
+test('getPublicShare returns the metadata fields including the file id', async () => {
+  const metadata = { enc: 1, encName: 'enc', sizeBytes: 1024, mimeType: 'application/octet-stream', expiresAt: null, id: 'file/id' }
+  let request
+  const restore = mockFetch(
+    new Response(JSON.stringify(metadata), { headers: { 'Content-Type': 'application/json' } }),
+    (input, init) => { request = { input, init } },
+  )
+  try {
+    assert.deepEqual(await getPublicShare('token'), {
+      enc: 1,
+      encName: 'enc',
+      name: null,
+      sizeBytes: 1024,
+      mimeType: 'application/octet-stream',
+      expiresAt: null,
+      id: 'file/id',
+    })
+    assert.equal(request.input, '/api/public/shares/token')
+  } finally {
+    restore()
+  }
+})
+
+test('getPublicShare defaults enc to 0 and id to null for legacy metadata', async () => {
   const metadata = { name: 'report.pdf', sizeBytes: 1024, mimeType: 'application/pdf', expiresAt: null }
   let request
   const restore = mockFetch(
@@ -131,7 +154,15 @@ test('getPublicShare returns the metadata fields', async () => {
     (input, init) => { request = { input, init } },
   )
   try {
-    assert.deepEqual(await getPublicShare('token'), metadata)
+    assert.deepEqual(await getPublicShare('token'), {
+      enc: 0,
+      encName: null,
+      name: 'report.pdf',
+      sizeBytes: 1024,
+      mimeType: 'application/pdf',
+      expiresAt: null,
+      id: null,
+    })
     assert.equal(request.input, '/api/public/shares/token')
   } finally {
     restore()
