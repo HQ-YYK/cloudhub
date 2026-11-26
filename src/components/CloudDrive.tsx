@@ -4,7 +4,6 @@ import {
   deleteFile,
   downloadFile,
   fetchFileRange,
-  listFiles,
   renameItem,
   type DriveItem,
 } from '../api/files'
@@ -13,7 +12,8 @@ import { useAuth } from '../auth/useAuth'
 import { DownloadError, downloadEncryptedFile, formatDownloadStatus } from '../files/download'
 import { checkName, nameProblemMessage } from '../files/names'
 import { buildCreateDirectoryPayload, buildRenamePayload } from '../files/rename'
-import { fileKeyFor, resolveDriveItems, type DisplayItem } from '../files/session'
+import { useDirectoryList } from '../files/list-cache'
+import { fileKeyFor } from '../files/session'
 import { EmptyIcon, FileIcon, FolderIcon, MoreIcon, UploadIcon } from './DriveIcons'
 import MoveDialog from './MoveDialog'
 import RenameInput from './RenameInput'
@@ -29,10 +29,6 @@ type DirectoryLevel = {
 export default function CloudDrive() {
   const { masterKey } = useAuth()
   const [levels, setLevels] = useState<DirectoryLevel[]>([{ id: null, name: '我的云盘' }])
-  const [entries, setEntries] = useState<DisplayItem[]>([])
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [loadError, setLoadError] = useState('')
   const [folderName, setFolderName] = useState('')
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
@@ -48,6 +44,7 @@ export default function CloudDrive() {
   const [shareTarget, setShareTarget] = useState<DriveItem | null>(null)
   const [folderMenuId, setFolderMenuId] = useState<string | null>(null)
   const current = levels[levels.length - 1]
+  const { entries, loading, refreshing, loadError, refresh, invalidate } = useDirectoryList(masterKey, current.id)
   const uploadQueueRef = useRef<UploadQueueHandle>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const currentIdRef = useRef(current.id)
@@ -89,38 +86,10 @@ export default function CloudDrive() {
     }
   }, [folderMenuId])
 
-  const loadDirectory = useCallback(async (parentId: string | null, mode: 'initial' | 'refresh' = 'initial') => {
-    if (mode === 'initial') setLoading(true)
-    else setRefreshing(true)
-    setLoadError('')
-    try {
-      const items = await listFiles(parentId)
-      if (masterKey) setEntries(await resolveDriveItems(masterKey, items))
-      else setEntries(items.map((item) => ({ item, name: item.enc === 1 ? '无法解密的项目' : item.name, status: item.enc === 1 ? 'failed' : 'plain' })))
-    } catch (error) {
-      if (mode === 'initial') setEntries([])
-      setLoadError(requestErrorMessage(error, 'list'))
-    } finally {
-      if (mode === 'initial') setLoading(false)
-      else setRefreshing(false)
-    }
-  }, [masterKey])
-
   const handleUploadDone = useCallback((parentId: string | null) => {
-    if (parentId === currentIdRef.current) void loadDirectory(currentIdRef.current, 'refresh')
-  }, [loadDirectory])
-
-  useEffect(() => {
-    let active = true
-    async function loadCurrentDirectory() {
-      if (!active) return
-      await loadDirectory(current.id)
-    }
-    void loadCurrentDirectory()
-    return () => {
-      active = false
-    }
-  }, [current.id, loadDirectory])
+    invalidate(parentId)
+    if (parentId === currentIdRef.current) void refresh()
+  }, [invalidate, refresh])
 
   function enterDirectory(directory: DriveItem, name: string) {
     setLevels((previous) => [...previous, { id: directory.id, name }])
@@ -193,7 +162,7 @@ export default function CloudDrive() {
       await createDirectory({ id: payload.id, parentId: current.id, encName: payload.encName, nameKey: payload.nameKey })
       setFolderName('')
       setFolderFormOpen(false)
-      await loadDirectory(current.id, 'refresh')
+      await refresh()
     } catch (error) {
       setCreateError(requestErrorMessage(error, 'create'))
     } finally {
@@ -265,7 +234,7 @@ export default function CloudDrive() {
     setActionError('')
     try {
       await deleteFile(item.id)
-      await loadDirectory(current.id, 'refresh')
+      await refresh()
     } catch (error) {
       setActionError(requestErrorMessage(error, 'delete'))
     } finally {
@@ -295,7 +264,7 @@ export default function CloudDrive() {
       const payload = await buildRenamePayload(masterKey, item, name)
       await renameItem(item.id, payload)
       setRenamingId((active) => (active === item.id ? null : active))
-      await loadDirectory(current.id, 'refresh')
+      await refresh()
     } catch (error) {
       setRenamingId((active) => (active === item.id ? null : active))
       setActionError(renameErrorMessage(error))
@@ -317,7 +286,7 @@ export default function CloudDrive() {
 
   function handleMoveDone() {
     setMoveTarget(null)
-    void loadDirectory(current.id, 'refresh')
+    void refresh()
   }
 
   function toggleFolderMenu(id: string) {
@@ -348,7 +317,7 @@ export default function CloudDrive() {
           </button>
           <input ref={fileInputRef} type="file" multiple className="visually-hidden" onChange={handleFileSelect} />
           <button className="secondary-small-button" type="button" onClick={openFolderForm}>新建文件夹</button>
-          <button className="secondary-small-button" type="button" onClick={() => void loadDirectory(current.id, 'refresh')} disabled={loading || refreshing}>
+          <button className="secondary-small-button" type="button" onClick={() => void refresh()} disabled={loading || refreshing}>
             {refreshing ? '刷新中…' : '刷新'}
           </button>
         </div>
@@ -392,7 +361,7 @@ export default function CloudDrive() {
       {loadError && (
         <div className="drive-alert" role="alert">
           <span>{loadError}</span>
-          <button type="button" onClick={() => void loadDirectory(current.id, 'refresh')}>重试</button>
+          <button type="button" onClick={() => void refresh()}>重试</button>
         </div>
       )}
       <UploadQueue ref={uploadQueueRef} onItemDone={handleUploadDone} masterKey={masterKey} />
