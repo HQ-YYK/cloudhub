@@ -56,9 +56,10 @@ export async function restoreTrashItem(id: string): Promise<DriveItem> {
 export async function purgeTrashItem(
   id: string,
   onProgress?: (purged: number) => void,
-): Promise<{ purged: number; remaining: number }> {
+): Promise<{ purged: number; remaining: number; error?: string }> {
   let purged = 0
   let remaining = 0
+  let error: string | undefined
   for (let round = 0; round < 200; round += 1) {
     const payload = await requestTrash(`/api/trash/${encodeURIComponent(id)}`, { method: 'DELETE' })
     if (payload.purged === true) {
@@ -71,14 +72,19 @@ export async function purgeTrashItem(
     purged += payload.purged
     remaining = payload.remaining
     onProgress?.(purged)
+    if (typeof payload.error === 'string') {
+      error = payload.error
+      break
+    }
     if (remaining <= 0 || payload.purged === 0) break
   }
-  return { purged, remaining }
+  return error ? { purged, remaining, error } : { purged, remaining }
 }
 
-export async function emptyTrash(): Promise<{ purged: number; remaining: number }> {
+export async function emptyTrash(): Promise<{ purged: number; remaining: number; error?: string }> {
   let purged = 0
   let remaining = 0
+  let error: string | undefined
   for (let round = 0; round < 20; round += 1) {
     const payload = await requestTrash('/api/trash', { method: 'DELETE' })
     if (typeof payload.purged !== 'number' || typeof payload.remaining !== 'number') {
@@ -86,7 +92,11 @@ export async function emptyTrash(): Promise<{ purged: number; remaining: number 
     }
     purged += payload.purged
     remaining = payload.remaining
+    if (typeof payload.error === 'string') {
+      error = payload.error
+      break
+    }
     if (remaining <= 0 || payload.purged === 0) break
   }
-  return { purged, remaining }
+  return error ? { purged, remaining, error } : { purged, remaining }
 }
