@@ -58,6 +58,7 @@ for (let attempt = 0; attempt < 20; attempt += 1) {
       parentId: parentId === 'NULL' ? null : parentId,
       name,
       nameKey: name.toLocaleLowerCase('en-US'),
+      enc: 1,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     })

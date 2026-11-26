@@ -70,6 +70,8 @@ function shareFile(options: Partial<StoredFile> = {}): StoredFile {
     storage_status: 'ready',
     kind: 'file',
     storage_account_id: null,
+    enc: 0,
+    wrapped_key: null,
     ...options,
   }
 }
@@ -101,6 +103,8 @@ function toShareWithFile(share: ShareRecord, file: StoredFile): ShareWithFileRec
     file_storage_status: file.storage_status,
     file_kind: file.kind,
     file_storage_account_id: file.storage_account_id ?? null,
+    file_enc: file.enc,
+    file_wrapped_key: file.wrapped_key,
   }
 }
 
@@ -156,6 +160,8 @@ function shareRepository(files: StoredFile[] = [], shares: ShareRecord[] = []) {
         deleted_at: file.deleted_at,
         storage_status: file.storage_status,
         kind: file.kind,
+        enc: file.enc,
+        wrapped_key: file.wrapped_key,
       }
     },
     async listByFile(ownerIdValue, id, limit) {
@@ -354,6 +360,9 @@ test('listSharesByFile returns shares including inactive ones and marks file sta
   assert.deepEqual(views.map((view) => view.id), ['active', 'revoked', 'expired'])
   assert.deepEqual(views.map((view) => view.active), [true, false, false])
   assert.ok(views.every((view) => view.url.startsWith('https://cloudhub.test/s/')))
+  assert.ok(views.every((view) => view.enc === 0))
+  assert.ok(views.every((view) => view.encName === '报告.txt'))
+  assert.ok(views.every((view) => view.wrappedKey === null))
 })
 
 test('revokeShare is idempotent and removes public access', async () => {
@@ -395,6 +404,8 @@ test('getPublicShareMetadata returns only file fields and hides inactive links',
 
   const metadata = await getPublicShareMetadata(repository, token, '2030-01-01T00:00:00.000Z')
   assert.deepEqual(metadata, {
+    id: fileId,
+    enc: 0,
     name: '报告.txt',
     sizeBytes: 100,
     mimeType: 'text/plain',
@@ -423,6 +434,27 @@ test('getPublicShareMetadata returns only file fields and hides inactive links',
     getPublicShareMetadata(repository, 'not-a-valid-token', '2030-01-01T00:00:00.000Z'),
     (error: unknown) => error instanceof ShareServiceError && error.code === 'not_found',
   )
+})
+
+test('getPublicShareMetadata returns encName for encrypted files', async () => {
+  const token = testToken()
+  const tokenHash = await sha256Hex(token)
+  const encName = 'A'.repeat(44)
+  const wrappedKey = 'A'.repeat(80)
+  const { repository } = shareRepository(
+    [shareFile({ enc: 1, wrapped_key: wrappedKey, name: encName, mime_type: 'application/octet-stream' })],
+    [shareRecord({ id: 'active', token_hash: tokenHash })],
+  )
+
+  const metadata = await getPublicShareMetadata(repository, token, '2030-01-01T00:00:00.000Z')
+  assert.deepEqual(metadata, {
+    id: fileId,
+    enc: 1,
+    encName,
+    sizeBytes: 100,
+    mimeType: 'application/octet-stream',
+    expiresAt: null,
+  })
 })
 
 test('streamPublicShare supports range requests and returns 416 for out-of-range starts', async () => {
