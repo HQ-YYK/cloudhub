@@ -10,6 +10,7 @@ export default function LoginPage() {
   const [totpCode, setTotpCode] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [keepUnlocked, setKeepUnlocked] = useState(true)
 
   function resetErrors() {
     setError('')
@@ -21,7 +22,7 @@ export default function LoginPage() {
     resetErrors()
     setSubmitting(true)
     try {
-      const nextChallenge = await login(username.trim(), password)
+      const nextChallenge = await login(username.trim(), password, keepUnlocked)
       if (nextChallenge) {
         setChallenge(nextChallenge)
         setTotpCode('')
@@ -134,6 +135,13 @@ export default function LoginPage() {
               disabled={submitting}
               required
             />
+          </label>
+          <label className="keep-unlocked-row">
+            <span className="keep-unlocked-label">
+              <input type="checkbox" checked={keepUnlocked} onChange={(event) => setKeepUnlocked(event.target.checked)} disabled={submitting} />
+              <span>在这台设备上保持解锁</span>
+            </span>
+            <span className="keep-unlocked-hint">公共电脑或别人的电脑上请不要勾选</span>
           </label>
           {(error || sessionError) && <p className="form-error" role="alert">{error || sessionError}</p>}
           <button className="login-submit" type="submit" disabled={submitting}>

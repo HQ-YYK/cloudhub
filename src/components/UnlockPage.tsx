@@ -4,12 +4,14 @@ import { CryptoError, unwrapMasterKey } from '../crypto'
 import { useAuth } from '../auth/useAuth'
 import { credentialFor } from '../auth/credential'
 import { authErrorMessage } from '../auth/errors'
+import { clearDeviceKeys, storeDeviceKeys } from '../auth/device-keys'
 
 export default function UnlockPage() {
   const { user, setMasterKey, logout } = useAuth()
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [keepUnlocked, setKeepUnlocked] = useState(true)
 
   if (!user) return null
 
@@ -34,7 +36,10 @@ export default function UnlockPage() {
         setError('账号还没有设置文件加密')
         return
       }
-      setMasterKey(await unwrapMasterKey(keys.wrappedMasterKey, credential.wrapKey, currentUser.id))
+      const mk = await unwrapMasterKey(keys.wrappedMasterKey, credential.wrapKey, currentUser.id)
+      setMasterKey(mk)
+      if (keepUnlocked) void storeDeviceKeys(currentUser.id, mk).catch(() => {})
+      else void clearDeviceKeys(currentUser.id).catch(() => {})
     } catch (requestError) {
       if (requestError instanceof CryptoError && requestError.code === 'decrypt_failed') {
         setError('密码不正确')
@@ -67,6 +72,13 @@ export default function UnlockPage() {
               disabled={busy}
               required
             />
+          </label>
+          <label className="keep-unlocked-row">
+            <span className="keep-unlocked-label">
+              <input type="checkbox" checked={keepUnlocked} onChange={(event) => setKeepUnlocked(event.target.checked)} disabled={busy} />
+              <span>在这台设备上保持解锁</span>
+            </span>
+            <span className="keep-unlocked-hint">公共电脑或别人的电脑上请不要勾选</span>
           </label>
           {error && <p className="form-error" role="alert">{error}</p>}
           <button className="login-submit" type="submit" disabled={busy}>

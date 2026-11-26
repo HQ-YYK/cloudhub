@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   AuthRequestError,
   getCurrentUser,
@@ -11,6 +11,8 @@ import {
   type TotpCredential,
 } from '../api/auth.ts'
 import { unwrapMasterKey } from '../crypto/index.ts'
+import { clearDerivedKeys } from '../files/session.ts'
+import { clearDeviceKeys, loadDeviceMk, storeDeviceKeys } from './device-keys.ts'
 import { credentialFor, type AccountCredential, type AuthKeyCredential } from './credential.ts'
 import { AuthContext, type AuthStatus } from './auth-context.ts'
 
@@ -20,14 +22,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null)
   const [masterKey, setMasterKeyState] = useState<Uint8Array<ArrayBuffer> | null>(null)
   const [pendingCredential, setPendingCredential] = useState<AccountCredential | null>(null)
+  const keepUnlockedRef = useRef(true)
 
   useEffect(() => {
     let active = true
     getCurrentUser()
-      .then((currentUser) => {
+      .then(async (currentUser) => {
         if (!active) return
         setUser(currentUser)
         setStatus(currentUser ? 'authenticated' : 'anonymous')
+        if (!currentUser) {
+          void clearDeviceKeys().catch(() => {})
+          return
+        }
+        if (currentUser.keysReady && !currentUser.mustChangePassword) {
+          const mk = await loadDeviceMk(currentUser.id).catch(() => null)
+          if (active && mk) setMasterKeyState(mk)
+        }
       })
       .catch(() => {
         if (!active) return
@@ -51,12 +62,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!keys.wrappedMasterKey) throw new AuthRequestError(500, 'invalid_response')
     const mk = await unwrapMasterKey(keys.wrappedMasterKey, keyCredential.wrapKey, authenticatedUser.id)
     setMasterKeyState(mk)
+    if (keepUnlockedRef.current) {
+      void storeDeviceKeys(authenticatedUser.id, mk).catch(() => {})
+    } else {
+      void clearDeviceKeys(authenticatedUser.id).catch(() => {})
+    }
     setPendingCredential(null)
     setUser(authenticatedUser)
     setStatus('authenticated')
   }, [])
 
-  const login = useCallback(async (username: string, password: string) => {
+  const login = useCallback(async (username: string, password: string, keepUnlocked = true) => {
+    keepUnlockedRef.current = keepUnlocked
     setError(null)
     try {
       const credential = await credentialFor(username.trim(), password)
@@ -103,6 +120,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     setError(null)
     setMasterKeyState(null)
+    clearDerivedKeys()
+    void clearDeviceKeys().catch(() => {})
     setPendingCredential(null)
     try {
       await logoutRequest()
@@ -112,7 +131,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const setMasterKey = useCallback((mk: Uint8Array<ArrayBuffer> | null) => setMasterKeyState(mk), [])
+  const setMasterKey = useCallback((mk: Uint8Array<ArrayBuffer> | null) => {
+    setMasterKeyState(mk)
+    if (!mk) clearDerivedKeys()
+  }, [])
   const completeKeySetup = useCallback((mk: Uint8Array<ArrayBuffer>) => {
     setMasterKeyState(mk)
     setPendingCredential(null)

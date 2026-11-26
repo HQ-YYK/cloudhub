@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { listShares, revokeShare, type ShareView } from '../api/shares'
+import { useAuth } from '../auth/useAuth'
+import { resolveShares, type ResolvedShare } from '../files/share'
 import ShareLinkRow from './ShareLinkRow'
 import { shareErrorMessage } from './share-error'
 
@@ -8,13 +10,15 @@ function ShareEmptyIcon() {
     <svg viewBox="0 0 24 24" width="26" height="26" fill="none" aria-hidden="true">
       <path d="M12 15.25V4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M8.5 8 12 4.5 15.5 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M6 13.25v4.5A1.75 1.75 0 0 0 7.75 19.5h8.5a1.75 1.75 0 0 0 1.75-1.75v-4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M6 13.25v4.5A1.75 1.75 0 0 0 7.75 19.5h8.5a1.75 1.75 0 0 0 1.75-1.75v-4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }
 
 export default function MyShares() {
+  const { masterKey } = useAuth()
   const [shares, setShares] = useState<ShareView[]>([])
+  const [resolved, setResolved] = useState<ResolvedShare[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [loadError, setLoadError] = useState('')
@@ -35,6 +39,19 @@ export default function MyShares() {
       else setRefreshing(false)
     }
   }, [])
+
+  useEffect(() => {
+    let active = true
+    if (!masterKey) return
+    resolveShares(masterKey, shares)
+      .then((value) => {
+        if (active) setResolved(value)
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [shares, masterKey])
 
   useEffect(() => {
     let active = true
@@ -87,7 +104,7 @@ export default function MyShares() {
       <div className="share-list-panel">
         {loading ? (
           <p className="drive-state" aria-live="polite">正在加载分享…</p>
-        ) : shares.length === 0 ? (
+        ) : resolved.length === 0 ? (
           <div className="drive-state">
             <span className="drive-state-icon" aria-hidden="true"><ShareEmptyIcon /></span>
             <h3>还没有分享过文件</h3>
@@ -95,10 +112,12 @@ export default function MyShares() {
           </div>
         ) : (
           <ul className="share-list">
-            {shares.map((share) => (
+            {resolved.map(({ share, name, fullUrl }) => (
               <ShareLinkRow
                 key={share.id}
                 share={share}
+                name={name}
+                url={fullUrl}
                 revoking={revokingId === share.id}
                 onRevoke={() => void handleRevoke(share)}
               />

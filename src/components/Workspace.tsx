@@ -4,6 +4,7 @@ import CloudDrive from './CloudDrive'
 import TrashBin from './TrashBin'
 import MyShares from './MyShares'
 import ChangePassword from './ChangePassword'
+import DeviceTrust from './DeviceTrust'
 import RegenerateRecoveryCode from './RegenerateRecoveryCode'
 import TotpSettings from './TotpSettings'
 import AdminUsers from './AdminUsers'
@@ -121,6 +122,7 @@ export default function Workspace() {
         {activeModule === 'shares' && <MyShares />}
         {activeModule === 'account' && (
           <div className="account-settings">
+            <DeviceTrust />
             <ChangePassword />
             <RegenerateRecoveryCode />
             <TotpSettings />

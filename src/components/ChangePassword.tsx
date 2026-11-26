@@ -4,6 +4,7 @@ import { deriveFromPassword, generateKdfSalt, wrapMasterKey } from '../crypto'
 import { useAuth } from '../auth/useAuth'
 import { credentialFor } from '../auth/credential'
 import { authErrorMessage } from '../auth/errors'
+import { clearDeviceKeys, hasDeviceKeys, storeDeviceKeys } from '../auth/device-keys'
 
 export default function ChangePassword() {
   const { user, masterKey, passwordChanged } = useAuth()
@@ -39,6 +40,7 @@ export default function ChangePassword() {
       return
     }
 
+    const wasEnabled = await hasDeviceKeys(user.id).catch(() => false)
     setSubmitting(true)
     try {
       const credential = await credentialFor(user.username, currentPassword)
@@ -52,6 +54,8 @@ export default function ChangePassword() {
         wrappedMasterKey,
       })
       passwordChanged()
+      await clearDeviceKeys(user.id).catch(() => {})
+      if (wasEnabled) await storeDeviceKeys(user.id, masterKey).catch(() => {})
       setCurrentPassword('')
       setNewPassword('')
       setConfirmPassword('')

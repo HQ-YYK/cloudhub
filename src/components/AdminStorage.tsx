@@ -61,7 +61,11 @@ function storageErrorNotice(code: string | null): string | null {
   if (code === 'too_many_accounts') return '最多只能添加 10 个 Google 账号'
   if (code === 'not_admin') return '只有管理员可以添加 Google 账号'
   if (code === 'not_configured') return '存储尚未配置'
-  return '授权失败，请重试'
+  if (code === 'token_exchange') return 'Google 换取令牌失败，请重试'
+  if (code === 'token_incomplete') return 'Google 没有返回完整的授权信息，请重试；如果反复出现，请到 Google 账号的『第三方应用』里移除 CloudHub 后再添加'
+  if (code === 'drive_folder') return '在 Google 云盘里创建 CloudHub 文件夹失败，请重试'
+  if (code === 'no_email' || code === 'id_token_invalid') return '无法读取 Google 账号邮箱，请重试'
+  return `授权失败（代码：${code}），请重试`
 }
 
 type Banner = { kind: 'success' | 'error'; text: string }
