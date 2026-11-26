@@ -2,13 +2,19 @@
   "name": "cloudhub",
   "private": true,
   "version": "0.0.0",
+  "description": "给少数人用的私有云盘：端到端加密，跑在 Cloudflare Pages 上。",
   "type": "module",
+  "license": "MIT",
+  "repository": "https://github.com/HQ-YYK/cloudhub",
+  "engines": {
+    "node": ">=22.6"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:frontend": "node --experimental-strip-types --test src/api/files.test.mjs src/api/auth.test.mjs src/api/admin.test.mjs src/api/uploads.test.mjs src/api/trash.test.mjs src/api/shares.test.mjs src/utils/initial-password.test.mjs src/crypto/crypto.test.mjs src/auth/credential.test.mjs src/auth/screen.test.mjs src/auth/recovery-code.test.mjs src/auth/device-keys.test.mjs src/files/names.test.mjs src/files/chunks.test.mjs src/files/share.test.mjs src/files/items.test.mjs",
+    "test:frontend": "node --experimental-strip-types --test src/api/files.test.mjs src/api/auth.test.mjs src/api/admin.test.mjs src/api/uploads.test.mjs src/api/trash.test.mjs src/api/shares.test.mjs src/utils/initial-password.test.mjs src/crypto/crypto.test.mjs src/auth/credential.test.mjs src/auth/screen.test.mjs src/auth/recovery-code.test.mjs src/auth/device-keys.test.mjs src/files/names.test.mjs src/files/chunks.test.mjs src/files/share.test.mjs src/files/items.test.mjs scripts/create-user-sql.test.mjs",
     "test:functions": "node --experimental-strip-types --test --test-concurrency=1 functions/**/*.test.ts"
   },
   "dependencies": {

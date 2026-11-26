@@ -1,23 +1,22 @@
-import { createInterface } from 'node:readline/promises'
 import { execFileSync } from 'node:child_process'
-import { randomUUID, webcrypto } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { stdin as input, stdout as output } from 'node:process'
+import {
+  buildUserRecord,
+  readHiddenPassword,
+  sqlString,
+  userUpsertSql,
+} from './create-user.mjs'
 
 const DATABASE_NAME = 'cloudhub-db'
 const USERNAME = 'test'
-const ITERATIONS = 100000
-const encoder = new TextEncoder()
-
-function sqlString(value) {
-  return `'${value.replaceAll("'", "''")}'`
-}
+const ROLE = 'admin'
 
 function parseWranglerJson(output) {
   const jsonStart = output.indexOf('[')
-  if (jsonStart < 0) throw new Error('Wrangler did not return JSON.')
+  if (jsonStart < 0) throw new Error('wrangler 没有返回 JSON。')
   return JSON.parse(output.slice(jsonStart))
 }
 
@@ -41,124 +40,54 @@ function runLocalSql(sql) {
   }
 }
 
-function readHidden(question) {
-  return new Promise((resolve, reject) => {
-    if (!input.isTTY || !output.isTTY) {
-      reject(new Error('Run this command in an interactive terminal.'))
-      return
-    }
-
-    output.write(question)
-    input.setRawMode(true)
-    input.resume()
-    let value = ''
-    const onData = (chunk) => {
-      const character = chunk.toString()
-      if (character === '\r' || character === '\n') {
-        input.setRawMode(false)
-        input.pause()
-        input.removeListener('data', onData)
-        output.write('\n')
-        resolve(value)
-      } else if (character === '\u0003') {
-        input.setRawMode(false)
-        input.pause()
-        input.removeListener('data', onData)
-        reject(new Error('Cancelled.'))
-      } else if (character === '\u007f') {
-        value = value.slice(0, -1)
-      } else {
-        value += character
-      }
-    }
-    input.on('data', onData)
-  })
-}
-
-function base64Url(bytes) {
-  return Buffer.from(bytes).toString('base64url')
-}
-
-async function createPasswordRecord(password) {
-  const salt = webcrypto.getRandomValues(new Uint8Array(16))
-  const key = await webcrypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits'])
-  const bits = await webcrypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt, iterations: ITERATIONS, hash: 'SHA-256' },
-    key,
-    256,
-  )
-  return {
-    hash: base64Url(new Uint8Array(bits)),
-    salt: base64Url(salt),
-  }
-}
-
 function getSingleResult(result) {
   const rows = result.flatMap((entry) => entry.results ?? [])
-  if (rows.length !== 1) throw new Error('Unexpected local D1 result.')
-  return rows[0]
+  return rows.length === 0 ? null : rows[0]
+}
+
+function resolvePassword(argv) {
+  const index = argv.indexOf('--password')
+  if (index >= 0 && argv[index + 1]) return argv[index + 1]
+  if (process.env.CLOUDHUB_TEST_PASSWORD) return process.env.CLOUDHUB_TEST_PASSWORD
+  return readHiddenPassword('密码（输入隐藏）: ')
 }
 
 try {
-  if (!input.isTTY || !output.isTTY) {
-    throw new Error('Run this command in an interactive terminal.')
-  }
+  const password = await resolvePassword(process.argv.slice(2))
+  if (!password) throw new Error('密码不能为空。')
 
-  const countResult = runLocalSql(
-    `SELECT COUNT(*) AS matching_users FROM users WHERE username = ${sqlString(USERNAME)};`,
-  )
-  const countRow = getSingleResult(countResult)
-  if (Number(countRow.matching_users) !== 1) {
-    throw new Error('Expected exactly one local test user.')
-  }
+  let id
+  const existing = runLocalSql(`SELECT id FROM users WHERE username = ${sqlString(USERNAME)} LIMIT 1;`)
+  const existingRow = getSingleResult(existing)
+  id = existingRow ? existingRow.id : randomUUID()
 
-  const readline = createInterface({ input, output })
-  const username = (await readline.question(`Username [${USERNAME}]: `)).trim() || USERNAME
-  readline.close()
-  if (username !== USERNAME) throw new Error(`This script only updates "${USERNAME}".`)
+  const record = await buildUserRecord({ username: USERNAME, role: ROLE, password, id })
+  runLocalSql(userUpsertSql(record))
 
-  const password = await readHidden('Password (input hidden): ')
-  if (!password) throw new Error('Password is required.')
-
-  const passwordRecord = await createPasswordRecord(password)
-  const now = new Date().toISOString()
-  const updateResult = runLocalSql(`
-    UPDATE users
-    SET password_hash = ${sqlString(passwordRecord.hash)},
-        password_salt = ${sqlString(passwordRecord.salt)},
-        password_iterations = ${ITERATIONS},
-        updated_at = ${sqlString(now)},
-        disabled = 0
-    WHERE username = ${sqlString(USERNAME)};
-    SELECT changes() AS updated_rows;
-  `)
-  const updateRow = getSingleResult(updateResult)
-  if (Number(updateRow.updated_rows) !== 1) {
-    throw new Error('Local test user update did not affect exactly one row.')
-  }
-
-  const verifyResult = runLocalSql(`
-    SELECT username, disabled, length(password_hash) AS hash_length,
-      length(password_salt) AS salt_length, password_iterations
+  const verify = runLocalSql(`
+    SELECT username, disabled, kdf_salt, kdf_iterations,
+      length(kdf_salt) AS kdf_salt_length, length(wrapped_master_key) AS wrapped_key_length
     FROM users
     WHERE username = ${sqlString(USERNAME)} LIMIT 1;
   `)
-  const verifyRow = getSingleResult(verifyResult)
+  const row = getSingleResult(verify)
   if (
-    verifyRow.username !== USERNAME ||
-    Number(verifyRow.disabled) !== 0 ||
-    Number(verifyRow.hash_length) !== 43 ||
-    Number(verifyRow.salt_length) !== 22 ||
-    Number(verifyRow.password_iterations) !== ITERATIONS
+    !row
+    || row.username !== USERNAME
+    || Number(row.disabled) !== 0
+    || !row.kdf_salt
+    || Number(row.kdf_salt_length) !== 22
+    || Number(row.wrapped_key_length) !== 80
+    || Number(row.kdf_iterations) !== 600000
   ) {
-    throw new Error('Local test user verification failed.')
+    throw new Error('本地测试用户校验失败。')
   }
 
-  console.log('Local test user initialized successfully.')
-  console.log(`database: ${DATABASE_NAME} (local)`)
-  console.log(`username: ${USERNAME}`)
-  console.log('password format: valid')
+  console.log('本地测试用户已就绪。')
+  console.log(`数据库: ${DATABASE_NAME} (local)`)
+  console.log(`用户名: ${USERNAME}`)
+  console.log(`角色: ${ROLE}`)
 } catch (error) {
-  console.error(error instanceof Error ? error.message : 'Local test user initialization failed.')
+  console.error(error instanceof Error ? error.message : '本地测试用户初始化失败。')
   process.exitCode = 1
 }
