@@ -61,5 +61,7 @@ export function trashErrorResponse(error: TrashServiceError) {
   if (error.code === 'conflict') return jsonResponse({ error: 'conflict' }, 409)
   if (error.code === 'purged') return jsonResponse({ error: 'purged' }, 410)
   if (error.code === 'storage_unavailable') return jsonResponse({ error: 'storage_unavailable' }, 503)
+  if (error.code === 'storage_not_connected') return jsonResponse({ error: 'storage_not_connected' }, 503)
+  if (error.code === 'storage_reauth_required') return jsonResponse({ error: 'storage_reauth_required' }, 503)
   return jsonResponse({ error: error.code }, 400)
 }

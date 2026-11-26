@@ -154,7 +154,7 @@ export interface TrashRepository {
   restoreFile(ownerId: string, id: string, updatedAt: string): Promise<FileRecord | null>
   deleteTrashedFile(ownerId: string, id: string): Promise<void>
   deleteExpiredTrash(ownerId: string, cutoff: string): Promise<number>
-  listTrashObjectKeys(ownerId: string, cutoff: string, limit: number): Promise<Array<{ id: string, object_key: string, storage_account_id: number | null }>>
+  listTrashObjectKeys(ownerId: string, cutoff: string, limit: number): Promise<Array<{ id: string, object_key: string | null, storage_account_id: number | null }>>
   countTrash(ownerId: string, cutoff: string): Promise<number>
 }
 
@@ -174,7 +174,7 @@ export interface TrashTreeRepository {
     updatedAt: string,
   ): Promise<FileRecord | null>
   deleteTrashedBatch(ownerId: string, deletedAt: string): Promise<number>
-  listBatchObjectKeys(ownerId: string, deletedAt: string, limit: number): Promise<Array<{ id: string, object_key: string, storage_account_id: number | null }>>
+  listBatchObjectKeys(ownerId: string, deletedAt: string, limit: number): Promise<Array<{ id: string, object_key: string | null, storage_account_id: number | null }>>
   countBatchFiles(ownerId: string, deletedAt: string): Promise<number>
   purgeEmptyTrashFolders(ownerId: string, cutoff: string): Promise<number>
   listExpiredLiveObjectKeys(ownerId: string, cutoff: string, limit: number): Promise<Array<{ id: string, object_key: string, storage_account_id: number | null }>>

@@ -10,6 +10,8 @@ import {
 import { publicFileRecord, validateFileId } from './file-service.ts'
 
 export const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+// Free plan allows 50 subrequests per request. One clear/folder round is
+// 1 list + 40 Drive deletes + 2 purge queries + 1 count = 44, leaving headroom.
 export const TRASH_CLEAR_BATCH_SIZE = 40
 // Smaller than the clear batch so opening the trash stays fast.
 const EXPIRED_PURGE_BATCH_SIZE = 20
@@ -21,6 +23,8 @@ export type TrashErrorCode =
   | 'conflict'
   | 'purged'
   | 'storage_unavailable'
+  | 'storage_not_connected'
+  | 'storage_reauth_required'
 
 export class TrashServiceError extends Error {
   readonly code: TrashErrorCode
@@ -66,6 +70,19 @@ export function createTrashService(deps: TrashServiceDeps) {
 
   async function markPurged(ownerId: string, fileId: string) {
     await deps.trashRepository.deleteTrashedFile(ownerId, fileId)
+  }
+
+  function storageError(error: unknown): TrashServiceError {
+    if (error instanceof TrashServiceError) return error
+    if (error instanceof BlobStoreError) {
+      if (error.message === 'storage_not_connected') {
+        return new TrashServiceError('storage_not_connected', { cause: error })
+      }
+      if (error.message === 'storage_reauth_required') {
+        return new TrashServiceError('storage_reauth_required', { cause: error })
+      }
+    }
+    return new TrashServiceError('storage_unavailable', { cause: error })
   }
 
   async function list(request: Request) {
@@ -185,11 +202,22 @@ export function createTrashService(deps: TrashServiceDeps) {
     )
 
     let purged = 0
+    let error: TrashErrorCode | undefined
     for (const record of batch) {
+      if (record.object_key === null) {
+        await markPurged(user.id, record.id)
+        purged += 1
+        continue
+      }
       try {
         await deps.driveClient.deletePermanently(record.object_key, record.storage_account_id ?? 1)
-      } catch (error) {
-        if (!(error instanceof BlobStoreError && error.code === 'not_found')) break
+      } catch (cause) {
+        if (cause instanceof BlobStoreError && cause.code === 'not_found') {
+          // The Drive object is already gone; delete the row below.
+        } else {
+          error = storageError(cause).code
+          break
+        }
       }
       await markPurged(user.id, record.id)
       purged += 1
@@ -199,7 +227,7 @@ export function createTrashService(deps: TrashServiceDeps) {
     if (remaining === 0) {
       await deps.trashRepository.deleteTrashedBatch(user.id, item.deleted_at)
     }
-    return { purged, remaining }
+    return error ? { purged, remaining, error } : { purged, remaining }
   }
 
   async function purgeOne(request: Request, fileId: string) {
@@ -215,13 +243,16 @@ export function createTrashService(deps: TrashServiceDeps) {
 
     if (item.kind === 'directory') return purgeFolder(user, item)
 
-    if (item.object_key === null) throw new TrashServiceError('not_found')
+    if (item.object_key === null) {
+      await markPurged(user.id, fileId)
+      return { purged: true }
+    }
 
     try {
       await deps.driveClient.deletePermanently(item.object_key, item.storage_account_id ?? 1)
     } catch (error) {
       if (!(error instanceof BlobStoreError && error.code === 'not_found')) {
-        throw new TrashServiceError('storage_unavailable', { cause: error })
+        throw storageError(error)
       }
     }
 
@@ -239,11 +270,20 @@ export function createTrashService(deps: TrashServiceDeps) {
     )
 
     let purged = 0
+    let error: TrashErrorCode | undefined
     for (const record of batch) {
+      if (record.object_key === null) {
+        await markPurged(user.id, record.id)
+        purged += 1
+        continue
+      }
       try {
         await deps.driveClient.deletePermanently(record.object_key, record.storage_account_id ?? 1)
-      } catch (error) {
-        if (!(error instanceof BlobStoreError && error.code === 'not_found')) {
+      } catch (cause) {
+        if (cause instanceof BlobStoreError && cause.code === 'not_found') {
+          // The Drive object is already gone; delete the row below.
+        } else {
+          error = storageError(cause).code
           break
         }
       }
@@ -253,7 +293,7 @@ export function createTrashService(deps: TrashServiceDeps) {
 
     await deps.trashRepository.purgeEmptyTrashFolders(user.id, cutoff)
     const remaining = await deps.trashRepository.countTrash(user.id, cutoff)
-    return { purged, remaining }
+    return error ? { purged, remaining, error } : { purged, remaining }
   }
 
   return { list, restore, purgeOne, clear }
