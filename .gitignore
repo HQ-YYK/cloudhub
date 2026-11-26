@@ -26,3 +26,9 @@ cloudhub-auth-seed.local.sql
 *.njsproj
 *.sln
 *.sw?
+
+# Local task and worktree artifacts
+.tmp/
+.worktrees/
+DONE.md
+tasks/
