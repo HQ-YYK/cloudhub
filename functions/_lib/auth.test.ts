@@ -323,6 +323,7 @@ test('me returns only public user fields', async () => {
     mustChangePassword: false,
     keysReady: false,
     totpEnabled: false,
+    passkeyCount: 0,
   })
   assert.equal('sessionId' in body.user, false)
 })
