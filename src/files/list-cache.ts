@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { FilesRequestError, listFiles, type DriveItem } from '../api/files.ts'
+import { platformErrorMessage } from '../utils/service-limits.ts'
 import { DECRYPT_FAILED_NAME, resolveDriveItems, type DisplayItem } from './session.ts'
 
 export type ParentId = string | null
 
 function listErrorMessage(error: unknown): string {
+  const platform = platformErrorMessage(error)
+  if (platform) return platform
   if (error instanceof FilesRequestError) {
     if (error.code === 'password_change_required') return '请先修改密码'
     if (error.status === 401) return '登录状态已失效，请重新登录后继续。'
