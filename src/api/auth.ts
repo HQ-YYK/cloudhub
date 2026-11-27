@@ -7,6 +7,7 @@ export type AuthUser = {
   mustChangePassword: boolean
   totpEnabled?: boolean
   keysReady: boolean
+  passkeyCount?: number
 }
 
 type AuthResponse = {
