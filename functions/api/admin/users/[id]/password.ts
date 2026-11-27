@@ -2,12 +2,15 @@ import type { PagesFunction } from '@cloudflare/workers-types'
 import type { AuthRepository } from '../../../../_lib/auth-repository.ts'
 import { getAuthenticatedUser, hashPassword } from '../../../../_lib/auth.ts'
 import { createD1AuthRepository } from '../../../../_lib/d1-auth-repository.ts'
+import { createD1PasskeyRepository } from '../../../../_lib/d1-passkey-repository.ts'
 import type { AuthEnv } from '../../../../_lib/cloudflare-env.ts'
 import { jsonResponse, methodNotAllowed, sameOriginRequest } from '../../../../_lib/http.ts'
 import { isValidAuthKey, isValidKdfSalt, KDF_ITERATIONS } from '../../../../_lib/keys.ts'
+import type { PasskeyRepository } from '../../../../_lib/passkey-repository.ts'
 
 interface AdminPasswordDependencies {
   createAuthRepository: (env: AuthEnv) => AuthRepository
+  createPasskeyRepository: (env: AuthEnv) => PasskeyRepository
 }
 
 export function createAdminPasswordHandler(
@@ -17,6 +20,10 @@ export function createAdminPasswordHandler(
     createAuthRepository: (env) => {
       if (!env.DB) throw new Error('database_configuration_missing')
       return createD1AuthRepository(env.DB)
+    },
+    createPasskeyRepository: (env) => {
+      if (!env.DB) throw new Error('database_configuration_missing')
+      return createD1PasskeyRepository(env.DB)
     },
     ...overrides,
   }
@@ -28,6 +35,7 @@ export function createAdminPasswordHandler(
 
     try {
       const repository = dependencies.createAuthRepository(context.env)
+      const passkeyRepository = dependencies.createPasskeyRepository(context.env)
       const admin = await getAuthenticatedUser(repository, context.request)
       if (!admin) return jsonResponse({ error: 'unauthorized' }, 401)
       if (admin.role !== 'admin' || admin.mustChangePassword) {
@@ -63,6 +71,7 @@ export function createAdminPasswordHandler(
         1,
         new Date().toISOString(),
       )
+      await passkeyRepository.deletePasskeysByUser(id)
       await repository.revokeAllSessions(id)
       const updated = await repository.findUserById(id)
       return jsonResponse({ user: updated })

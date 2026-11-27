@@ -4,6 +4,7 @@ import type { D1Database } from '@cloudflare/workers-types'
 import type { AuthRepository, StoredUser } from '../../_lib/auth-repository.ts'
 import { hashPassword } from '../../_lib/auth.ts'
 import type { KeysRepository, UpdateKeysInput } from '../../_lib/keys.ts'
+import type { PasskeyRepository } from '../../_lib/passkey-repository.ts'
 import { createKeysHandler } from './keys.ts'
 import { createKeysRecoveryHandler } from './keys/recovery.ts'
 import { createKeysResetHandler } from './keys/reset.ts'
@@ -39,6 +40,24 @@ function repository(storedUser: StoredUser | null) {
   const keyUpdates: UpdateKeysInput[] = []
   const recoveryUpdates: string[] = []
   const revokedKeep: string[] = []
+  const prfCleared: string[] = []
+
+  const passkeyRepository: PasskeyRepository = {
+    listPasskeys: async () => [],
+    countPasskeys: async () => 0,
+    findPasskeyById: async () => null,
+    findPasskeyForLogin: async () => null,
+    createPasskey: async () => true,
+    updatePasskeyName: async () => false,
+    setPrfWrappedKey: async () => false,
+    deletePasskey: async () => false,
+    deletePasskeysByUser: async () => undefined,
+    clearPrfWrappedKeys: async (userId) => { prfCleared.push(userId) },
+    updatePasskeyUsage: async () => undefined,
+    createWebauthnChallenge: async () => undefined,
+    findWebauthnChallenge: async () => null,
+    consumeWebauthnChallenge: async () => false,
+  }
 
   const authRepository: AuthRepository = {
     findUser: async (username) => storedUser && storedUser.username === username ? storedUser : null,
@@ -74,10 +93,12 @@ function repository(storedUser: StoredUser | null) {
   return {
     authRepository,
     keysRepository,
+    passkeyRepository,
     get failures() { return failures },
     get keyUpdates() { return keyUpdates },
     get recoveryUpdates() { return recoveryUpdates },
     get revokedKeep() { return revokedKeep },
+    get prfCleared() { return prfCleared },
   }
 }
 
@@ -212,6 +233,7 @@ test('keys/reset replaces keys for a must-change-password new-format account', a
   const handler = createKeysResetHandler({
     createAuthRepository: () => current.authRepository,
     createKeysRepository: () => current.keysRepository,
+    createPasskeyRepository: () => current.passkeyRepository,
   })
 
   const response = await handler({
@@ -230,6 +252,7 @@ test('keys/reset replaces keys for a must-change-password new-format account', a
   assert.equal(current.keyUpdates[0].mustChangePassword, 0)
   assert.equal(current.keyUpdates[0].kdfIterations, 600000)
   assert.deepEqual(current.revokedKeep, [`${userId}:current-session`])
+  assert.deepEqual(current.prfCleared, [userId])
 })
 
 test('keys/reset rejects an account that is not in the reset state', async () => {
@@ -242,6 +265,7 @@ test('keys/reset rejects an account that is not in the reset state', async () =>
   const handler = createKeysResetHandler({
     createAuthRepository: () => current.authRepository,
     createKeysRepository: () => current.keysRepository,
+    createPasskeyRepository: () => current.passkeyRepository,
   })
 
   const response = await handler({

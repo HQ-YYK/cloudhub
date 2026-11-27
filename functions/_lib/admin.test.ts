@@ -4,6 +4,7 @@ import type { D1Database } from '@cloudflare/workers-types'
 import type { PagesFunction } from '@cloudflare/workers-types'
 import type { AuthRepository, StoredUser, UserSummary } from './auth-repository.ts'
 import { AuthRepositoryConflictError } from './auth-repository.ts'
+import type { PasskeyRepository } from './passkey-repository.ts'
 import { createAdminUsersHandler } from '../api/admin/users/index.ts'
 import { createAdminUserHandler } from '../api/admin/users/[id].ts'
 import { createAdminPasswordHandler } from '../api/admin/users/[id]/password.ts'
@@ -97,6 +98,27 @@ function env() {
   return { DB: {} as D1Database }
 }
 
+function passkeyRepository() {
+  const deletedUsers: string[] = []
+  const repository: PasskeyRepository = {
+    listPasskeys: async () => [],
+    countPasskeys: async () => 0,
+    findPasskeyById: async () => null,
+    findPasskeyForLogin: async () => null,
+    createPasskey: async () => true,
+    updatePasskeyName: async () => false,
+    setPrfWrappedKey: async () => false,
+    deletePasskey: async () => false,
+    deletePasskeysByUser: async (id) => { deletedUsers.push(id) },
+    clearPrfWrappedKeys: async () => undefined,
+    updatePasskeyUsage: async () => undefined,
+    createWebauthnChallenge: async () => undefined,
+    findWebauthnChallenge: async () => null,
+    consumeWebauthnChallenge: async () => false,
+  }
+  return { repository, get deletedUsers() { return deletedUsers } }
+}
+
 function request(method: string, body?: unknown) {
   return new Request(`https://cloudhub.test/api/admin/users`, {
     method,
@@ -186,11 +208,13 @@ test('admin create and password reset require a valid kdf salt and auth key', as
   assert.equal(response.status, 400)
   assert.deepEqual(await response.json(), { error: 'invalid_request' })
 
-  const reset = createAdminPasswordHandler({ createAuthRepository: () => current.repository })
+  const passkeys = passkeyRepository()
+  const reset = createAdminPasswordHandler({ createAuthRepository: () => current.repository, createPasskeyRepository: () => passkeys.repository })
   response = await call(reset as never, 'POST', { kdfSalt, authKey }, { id: created.user.id })
   assert.equal(response.status, 200)
   assert.equal(current.passwordUpdates, 1)
   assert.equal(current.users.get(created.user.id)?.must_change_password, 1)
+  assert.deepEqual(passkeys.deletedUsers, [created.user.id])
 })
 
 test('admin can disable a user and reset password only for non-admin targets', async () => {
@@ -211,17 +235,19 @@ test('admin can disable a user and reset password only for non-admin targets', a
   response = await call(disable as never, 'PATCH', { disabled: true }, { id: 'missing' })
   assert.equal(response.status, 404)
 
-  const reset = createAdminPasswordHandler({ createAuthRepository: () => current.repository })
+  const passkeys = passkeyRepository()
+  const reset = createAdminPasswordHandler({ createAuthRepository: () => current.repository, createPasskeyRepository: () => passkeys.repository })
   response = await call(reset as never, 'POST', { kdfSalt, authKey }, { id: userId })
   assert.equal(response.status, 200)
   assert.equal(current.passwordUpdates, 1)
   assert.equal(current.users.get(userId)?.must_change_password, 1)
   assert.deepEqual(current.revoked, [userId, userId])
+  assert.deepEqual(passkeys.deletedUsers, [userId])
 
   const adminTarget = inMemoryRepository({
     authenticated: stored(),
     users: [{ ...target, id: adminId, username: 'root', role: 'admin' }],
   })
-  response = await call(createAdminPasswordHandler({ createAuthRepository: () => adminTarget.repository }) as never, 'POST', { kdfSalt, authKey }, { id: adminId })
+  response = await call(createAdminPasswordHandler({ createAuthRepository: () => adminTarget.repository, createPasskeyRepository: () => passkeyRepository().repository }) as never, 'POST', { kdfSalt, authKey }, { id: adminId })
   assert.equal(response.status, 403)
 })

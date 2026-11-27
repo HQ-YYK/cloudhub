@@ -10,6 +10,7 @@ import {
   verifyPassword,
 } from '../../../_lib/auth.ts'
 import { createD1AuthRepository } from '../../../_lib/d1-auth-repository.ts'
+import { createD1PasskeyRepository } from '../../../_lib/d1-passkey-repository.ts'
 import type { AuthEnv } from '../../../_lib/cloudflare-env.ts'
 import { jsonResponse, methodNotAllowed, sameOriginRequest } from '../../../_lib/http.ts'
 import {
@@ -20,12 +21,14 @@ import {
   KDF_ITERATIONS,
   type KeysRepository,
 } from '../../../_lib/keys.ts'
+import type { PasskeyRepository } from '../../../_lib/passkey-repository.ts'
 
 const MAX_BODY_LENGTH = 4096
 
 interface ResetDependencies {
   createAuthRepository: (env: AuthEnv) => AuthRepository
   createKeysRepository: (env: AuthEnv) => KeysRepository
+  createPasskeyRepository: (env: AuthEnv) => PasskeyRepository
 }
 
 export function createKeysResetHandler(
@@ -39,6 +42,10 @@ export function createKeysResetHandler(
     createKeysRepository: (env) => {
       if (!env.DB) throw new Error('database_configuration_missing')
       return createD1KeysRepository(env.DB)
+    },
+    createPasskeyRepository: (env) => {
+      if (!env.DB) throw new Error('database_configuration_missing')
+      return createD1PasskeyRepository(env.DB)
     },
     ...overrides,
   }
@@ -82,6 +89,7 @@ export function createKeysResetHandler(
     try {
       const repository = dependencies.createAuthRepository(context.env)
       const keysRepository = dependencies.createKeysRepository(context.env)
+      const passkeyRepository = dependencies.createPasskeyRepository(context.env)
       const user = await getAuthenticatedUser(repository, context.request)
       if (!user) return jsonResponse({ error: 'unauthorized' }, 401)
       const stored = await repository.findUser(user.username)
@@ -122,6 +130,7 @@ export function createKeysResetHandler(
         keysUpdatedAt: timestamp,
         updatedAt: timestamp,
       })
+      await passkeyRepository.clearPrfWrappedKeys(user.id)
       await repository.revokeOtherSessions(user.id, user.sessionId)
       return jsonResponse({ ok: true })
     } catch (error) {
