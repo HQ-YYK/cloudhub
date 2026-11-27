@@ -123,3 +123,8 @@ pnpm exec tsc -p tsconfig.functions.json --noEmit
 ## 许可
 
 [MIT](LICENSE)
+
+
+## 友情链接
+
+[LINUX DO — 新的理想型社区](https://linux.do)
