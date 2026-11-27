@@ -14,6 +14,7 @@ import { unwrapMasterKey } from '../crypto/index.ts'
 import { clearDerivedKeys } from '../files/session.ts'
 import { clearDeviceKeys, loadDeviceMk, storeDeviceKeys } from './device-keys.ts'
 import { credentialFor, type AccountCredential, type AuthKeyCredential } from './credential.ts'
+import { loginWithPasskey as loginWithPasskeyRequest } from './passkey.ts'
 import { AuthContext, type AuthStatus } from './auth-context.ts'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -117,6 +118,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [finishLogin, pendingCredential])
 
+  const loginWithPasskey = useCallback(async (keepUnlocked = true) => {
+    keepUnlockedRef.current = keepUnlocked
+    setError(null)
+    try {
+      const result = await loginWithPasskeyRequest()
+      const authenticatedUser = result.user
+      if (!authenticatedUser.keysReady || authenticatedUser.mustChangePassword) {
+        await logoutRequest().catch(() => {})
+        throw new Error('此账号需要先用密码登录完成设置。')
+      }
+      setPendingCredential(null)
+      setUser(authenticatedUser)
+      setStatus('authenticated')
+      if (result.mk) {
+        setMasterKeyState(result.mk)
+        if (keepUnlockedRef.current) {
+          void storeDeviceKeys(authenticatedUser.id, result.mk).catch(() => {})
+        } else {
+          void clearDeviceKeys(authenticatedUser.id).catch(() => {})
+        }
+      } else {
+        setMasterKeyState(null)
+        clearDerivedKeys()
+      }
+    } catch (requestError) {
+      if (requestError instanceof Error && 'status' in requestError) {
+        const status = (requestError as { status: number }).status
+        if (status === 401) throw new Error('Passkey 验证失败，请改用密码登录。', { cause: requestError })
+        if (status === 0) throw new Error('网络连接失败，请稍后重试。', { cause: requestError })
+      }
+      throw requestError instanceof Error ? requestError : new Error('登录服务暂时不可用，请稍后重试。', { cause: requestError })
+    }
+  }, [])
+
   const logout = useCallback(async () => {
     setError(null)
     setMasterKeyState(null)
@@ -157,6 +192,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       masterKey,
       pendingCredential,
       login,
+      loginWithPasskey,
       verifyTotp,
       logout,
       setMasterKey,
@@ -165,7 +201,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       totpChanged,
       clearError,
     }),
-    [status, user, error, masterKey, pendingCredential, login, verifyTotp, logout, setMasterKey, completeKeySetup, passwordChanged, totpChanged, clearError],
+    [status, user, error, masterKey, pendingCredential, login, loginWithPasskey, verifyTotp, logout, setMasterKey, completeKeySetup, passwordChanged, totpChanged, clearError],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

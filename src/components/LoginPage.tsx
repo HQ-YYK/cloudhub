@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from 'react'
 import { useAuth } from '../auth/useAuth'
+import { isPasskeySupported } from '../auth/passkey'
 import { platformErrorMessage } from '../utils/service-limits'
 
 export default function LoginPage() {
-  const { login, verifyTotp, error: sessionError, clearError } = useAuth()
+  const { login, loginWithPasskey, verifyTotp, error: sessionError, clearError } = useAuth()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [challenge, setChallenge] = useState<string | null>(null)
@@ -11,6 +12,7 @@ export default function LoginPage() {
   const [totpCode, setTotpCode] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [passkeyBusy, setPasskeyBusy] = useState(false)
   const [keepUnlocked, setKeepUnlocked] = useState(true)
 
   function resetErrors() {
@@ -56,6 +58,18 @@ export default function LoginPage() {
       setError(loginErrorMessage(requestError, '验证失败，请稍后重试。'))
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function handlePasskeyLogin() {
+    resetErrors()
+    setPasskeyBusy(true)
+    try {
+      await loginWithPasskey(keepUnlocked)
+    } catch (requestError) {
+      setError(loginErrorMessage(requestError, 'Passkey 登录失败，请稍后重试。'))
+    } finally {
+      setPasskeyBusy(false)
     }
   }
 
@@ -158,6 +172,14 @@ export default function LoginPage() {
             {submitting ? '正在计算密钥…' : '登录 CloudHub'}
           </button>
         </form>
+        {isPasskeySupported() && (
+          <div className="passkey-login">
+            <button className="login-secondary" type="button" onClick={handlePasskeyLogin} disabled={passkeyBusy || submitting}>
+              {passkeyBusy ? '正在验证…' : '用 Passkey 登录'}
+            </button>
+            <p className="passkey-hint">部分浏览器（如 Safari）用 Passkey 登录后还需要输一次密码解锁文件。</p>
+          </div>
+        )}
         <p className="auth-note">仅限已配置的 CloudHub 账号使用</p>
       </section>
     </main>

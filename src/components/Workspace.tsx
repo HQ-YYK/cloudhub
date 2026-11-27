@@ -7,6 +7,7 @@ import ChangePassword from './ChangePassword'
 import DeviceTrust from './DeviceTrust'
 import RegenerateRecoveryCode from './RegenerateRecoveryCode'
 import TotpSettings from './TotpSettings'
+import PasskeySettings from './PasskeySettings'
 import AdminUsers from './AdminUsers'
 import AdminStorage from './AdminStorage'
 
@@ -126,6 +127,7 @@ export default function Workspace() {
             <ChangePassword />
             <RegenerateRecoveryCode />
             <TotpSettings />
+            <PasskeySettings />
           </div>
         )}
         {activeModule === 'admin' && user?.role === 'admin' && <AdminUsers />}
