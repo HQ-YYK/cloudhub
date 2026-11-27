@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" width="960" height="540">
+  <rect width="960" height="540" fill="#f8fafc" />
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#64748b" />
+    </marker>
+  </defs>
+  <g font-family="Microsoft YaHei, PingFang SC, sans-serif">
+    <text x="480" y="42" text-anchor="middle" font-size="22" font-weight="700" fill="#0f172a">分块、并行与续传</text>
+
+    <!-- Left Panel: Upload -->
+    <rect x="28" y="66" width="440" height="446" rx="12" fill="#2563eb" fill-opacity="0.08" stroke="#2563eb" stroke-width="1.5" />
+    <text x="248" y="94" text-anchor="middle" font-size="15" font-weight="700" fill="#2563eb">上传</text>
+
+    <rect x="148" y="112" width="200" height="44" rx="8" fill="#2563eb" fill-opacity="0.12" stroke="#2563eb" stroke-width="1.5" />
+    <text x="248" y="139" text-anchor="middle" font-size="15" font-weight="600" fill="#0f172a">浏览器加密</text>
+
+    <line x1="248" y1="156" x2="248" y2="184" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)" />
+
+    <rect x="54" y="184" width="388" height="106" rx="10" fill="#2563eb" fill-opacity="0.08" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="5 4" />
+    <text x="248" y="204" text-anchor="middle" font-size="13" font-weight="600" fill="#2563eb">最多 3 个文件同时传</text>
+
+    <rect x="72" y="216" width="104" height="58" rx="8" fill="#2563eb" fill-opacity="0.12" stroke="#2563eb" stroke-width="1.5" />
+    <text x="124" y="239" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">文件 1</text>
+    <text x="124" y="261" text-anchor="middle" font-size="13" fill="#64748b">32 MiB 顺序</text>
+
+    <rect x="196" y="216" width="104" height="58" rx="8" fill="#2563eb" fill-opacity="0.12" stroke="#2563eb" stroke-width="1.5" />
+    <text x="248" y="239" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">文件 2</text>
+    <text x="248" y="261" text-anchor="middle" font-size="13" fill="#64748b">32 MiB 顺序</text>
+
+    <rect x="320" y="216" width="104" height="58" rx="8" fill="#2563eb" fill-opacity="0.12" stroke="#2563eb" stroke-width="1.5" />
+    <text x="372" y="239" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">文件 3</text>
+    <text x="372" y="261" text-anchor="middle" font-size="13" fill="#64748b">32 MiB 顺序</text>
+
+    <line x1="248" y1="290" x2="248" y2="318" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)" />
+
+    <rect x="148" y="318" width="200" height="44" rx="8" fill="#2563eb" fill-opacity="0.12" stroke="#2563eb" stroke-width="1.5" />
+    <text x="248" y="345" text-anchor="middle" font-size="15" font-weight="600" fill="#0f172a">Worker 转发</text>
+
+    <line x1="248" y1="362" x2="248" y2="390" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)" />
+
+    <rect x="148" y="390" width="200" height="44" rx="8" fill="#2563eb" fill-opacity="0.12" stroke="#2563eb" stroke-width="1.5" />
+    <text x="248" y="417" text-anchor="middle" font-size="15" font-weight="600" fill="#0f172a">Drive</text>
+
+    <rect x="72" y="454" width="352" height="38" rx="8" fill="#d97706" fill-opacity="0.12" stroke="#d97706" stroke-width="1.5" />
+    <text x="248" y="478" text-anchor="middle" font-size="14" font-weight="600" fill="#d97706">失败重试 2s 到 30s</text>
+
+    <!-- Right Panel: Download -->
+    <rect x="492" y="66" width="440" height="446" rx="12" fill="#16a34a" fill-opacity="0.08" stroke="#16a34a" stroke-width="1.5" />
+    <text x="712" y="94" text-anchor="middle" font-size="15" font-weight="700" fill="#16a34a">下载</text>
+
+    <rect x="612" y="112" width="200" height="44" rx="8" fill="#16a34a" fill-opacity="0.12" stroke="#16a34a" stroke-width="1.5" />
+    <text x="712" y="139" text-anchor="middle" font-size="15" font-weight="600" fill="#0f172a">Drive</text>
+
+    <line x1="712" y1="156" x2="712" y2="198" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)" />
+
+    <rect x="518" y="198" width="388" height="114" rx="10" fill="#16a34a" fill-opacity="0.08" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="5 4" />
+    <text x="712" y="220" text-anchor="middle" font-size="13" font-weight="600" fill="#16a34a">4 MiB x 4</text>
+
+    <rect x="534" y="236" width="80" height="56" rx="8" fill="#16a34a" fill-opacity="0.12" stroke="#16a34a" stroke-width="1.5" />
+    <text x="574" y="269" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">段 1</text>
+
+    <rect x="626" y="236" width="80" height="56" rx="8" fill="#16a34a" fill-opacity="0.12" stroke="#16a34a" stroke-width="1.5" />
+    <text x="666" y="269" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">段 2</text>
+
+    <rect x="718" y="236" width="80" height="56" rx="8" fill="#16a34a" fill-opacity="0.12" stroke="#16a34a" stroke-width="1.5" />
+    <text x="758" y="269" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">段 3</text>
+
+    <rect x="810" y="236" width="80" height="56" rx="8" fill="#16a34a" fill-opacity="0.12" stroke="#16a34a" stroke-width="1.5" />
+    <text x="850" y="269" text-anchor="middle" font-size="14" font-weight="600" fill="#0f172a">段 4</text>
+
+    <line x1="712" y1="312" x2="712" y2="354" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)" />
+
+    <rect x="612" y="354" width="200" height="44" rx="8" fill="#16a34a" fill-opacity="0.12" stroke="#16a34a" stroke-width="1.5" />
+    <text x="712" y="381" text-anchor="middle" font-size="15" font-weight="600" fill="#0f172a">浏览器解密</text>
+
+    <rect x="536" y="454" width="352" height="38" rx="8" fill="#d97706" fill-opacity="0.12" stroke="#d97706" stroke-width="1.5" />
+    <text x="712" y="478" text-anchor="middle" font-size="14" font-weight="600" fill="#d97706">30 秒无数据重试</text>
+  </g>
+</svg>

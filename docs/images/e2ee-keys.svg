@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" width="960" height="540">
+  <rect x="0" y="0" width="960" height="540" fill="#f8fafc"/>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <g font-family="Microsoft YaHei, PingFang SC, sans-serif">
+    <text x="480" y="42" text-anchor="middle" font-size="21" font-weight="700" fill="#0f172a">E2EE 密钥层级</text>
+
+    <!-- Arrows -->
+    <g fill="none" stroke="#64748b" stroke-width="1.5">
+      <path d="M 268 110 V 140 H 145 V 170" marker-end="url(#arrow)"/>
+      <path d="M 268 110 V 140 H 390 V 170" marker-end="url(#arrow)"/>
+      <path d="M 700 110 V 170" marker-end="url(#arrow)"/>
+      <path d="M 390 228 V 268" marker-end="url(#arrow)"/>
+      <path d="M 700 228 V 248 H 570 V 268" marker-end="url(#arrow)"/>
+      <path d="M 480 328 V 348 H 165 V 370" marker-end="url(#arrow)"/>
+      <path d="M 480 328 V 370" marker-end="url(#arrow)"/>
+      <path d="M 480 328 V 348 H 795 V 370" marker-end="url(#arrow)"/>
+      <path d="M 795 428 V 462" marker-end="url(#arrow)"/>
+    </g>
+
+    <!-- Arrow labels -->
+    <text x="278" y="131" text-anchor="start" font-size="12" fill="#64748b">PBKDF2 600k</text>
+    <text x="710" y="144" text-anchor="start" font-size="12" fill="#64748b">HKDF</text>
+
+    <!-- Row 1 -->
+    <rect x="180" y="66" width="176" height="44" rx="8" fill="#64748b" fill-opacity="0.10" stroke="#64748b" stroke-width="1.5"/>
+    <text x="268" y="93" text-anchor="middle" font-size="15" font-weight="600" fill="#0f172a">登录密码</text>
+
+    <rect x="620" y="66" width="160" height="44" rx="8" fill="#64748b" fill-opacity="0.10" stroke="#64748b" stroke-width="1.5"/>
+    <text x="700" y="93" text-anchor="middle" font-size="15" font-weight="600" fill="#0f172a">恢复码</text>
+
+    <!-- Row 2 -->
+    <rect x="60" y="170" width="170" height="58" rx="8" fill="#64748b" fill-opacity="0.10" stroke="#64748b" stroke-width="1.5"/>
+    <text x="145" y="194" text-anchor="middle" font-size="15" font-weight="600" fill="#0f172a">authKey</text>
+    <text x="145" y="216" text-anchor="middle" font-size="12" fill="#64748b">发给服务器</text>
+
+    <rect x="300" y="170" width="180" height="58" rx="8" fill="#2563eb" fill-opacity="0.10" stroke="#2563eb" stroke-width="1.5"/>
+    <text x="390" y="204" text-anchor="middle" font-size="15" font-weight="600" fill="#0f172a">包装密钥</text>
+
+    <rect x="605" y="170" width="190" height="58" rx="8" fill="#2563eb" fill-opacity="0.10" stroke="#2563eb" stroke-width="1.5"/>
+    <text x="700" y="204" text-anchor="middle" font-size="15" font-weight="600" fill="#0f172a">恢复包装密钥</text>
+
+    <!-- Row 3 -->
+    <rect x="310" y="268" width="340" height="60" rx="8" fill="#d97706" fill-opacity="0.12" stroke="#d97706" stroke-width="2"/>
+    <text x="480" y="293" text-anchor="middle" font-size="15" font-weight="700" fill="#0f172a">主密钥 MK</text>
+    <text x="480" y="315" text-anchor="middle" font-size="12" fill="#64748b">只在浏览器</text>
+
+    <!-- Row 4 -->
+    <rect x="70" y="370" width="190" height="58" rx="8" fill="#16a34a" fill-opacity="0.10" stroke="#16a34a" stroke-width="1.5"/>
+    <text x="165" y="404" text-anchor="middle" font-size="15" font-weight="600" fill="#0f172a">文件名密钥</text>
+
+    <rect x="365" y="370" width="230" height="58" rx="8" fill="#16a34a" fill-opacity="0.10" stroke="#16a34a" stroke-width="1.5"/>
+    <text x="480" y="404" text-anchor="middle" font-size="15" font-weight="600" fill="#0f172a">查重 HMAC 密钥</text>
+
+    <rect x="695" y="370" width="200" height="58" rx="8" fill="#16a34a" fill-opacity="0.10" stroke="#16a34a" stroke-width="1.5"/>
+    <text x="795" y="394" text-anchor="middle" font-size="15" font-weight="600" fill="#0f172a">文件密钥 FK</text>
+    <text x="795" y="416" text-anchor="middle" font-size="12" fill="#64748b">每个文件一把</text>
+
+    <!-- Leaf -->
+    <rect x="695" y="462" width="200" height="48" rx="8" fill="#64748b" fill-opacity="0.10" stroke="#64748b" stroke-width="1.5"/>
+    <text x="795" y="491" text-anchor="middle" font-size="15" font-weight="600" fill="#0f172a">32 MiB 密文块</text>
+  </g>
+</svg>
